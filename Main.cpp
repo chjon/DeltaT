@@ -12,11 +12,75 @@
 #include <stdlib.h>
 #include <math.h>
 #include <fstream>
+#include <time.h>
 
 using namespace std;
 
+// ------------- [Global constant declarations begin here] ------------- //
+
+enum gameState {IDLE, IN_PLAY, GAME_OVER};
+const char DEFAULT_FILE[] = "game.data";
+
+// -------------- [Global constant declarations end here] -------------- //
+
+
+
+// --------------------- [Timer class begins here] --------------------- //
+
+/*************************************************************************
+	This class allows the detecting of when a certain time has passed
+ *************************************************************************/
+
+class Timer {
+	private:
+		// The designated ending time
+		clock_t stopTime;
+
+	public:
+		// Constructor
+		Timer () {
+
+			// Initialize stop time to an invalid value
+			stopTime = -1;
+		}
+
+		// Deconstructor
+		~Timer () {}
+
+		// Set timer for some number of seconds in the future
+		bool setStopTime (float seconds) {
+
+			// Check for a valid time to add
+			if (seconds >= 0) {
+				stopTime = clock() + seconds * CLOCKS_PER_SEC;
+			}
+
+			return seconds >= 0;
+		}
+
+		// Determine whether the timer has finished
+		bool isFinished () {
+
+			// Check for a valid stop time
+			if (stopTime >= 0) {
+				// Return whether the current time has passed the
+				// designated stop time
+				return clock() >= stopTime;
+
+			// Handle invalid stop times
+			} else {
+				return false;
+			}
+		}
+};
+
+// ---------------------- [Timer class ends here] ---------------------- //
+
+
+
 // Structure for holding data about the game
 struct GameData {
+	gameState currentState;     // This indicates the current state of the game
 	int highScore;              // This stores the most times the button was
 	                            // pressed at the right time during a game
 	int currentLevel;           // This counts the number of times the button
@@ -27,7 +91,8 @@ struct GameData {
                                 // is turned on
 	int cycleTime;              // This is the minimum amount of time that must
 	                            // pass before the light can switch
-	int currentLightStartTime;  // This is the time the current light turned on
+	float timePerLight;         // This is the duration in seconds for which a
+	                            // light should be on
 	bool direction;             // true/false -> left/right
 };
 
@@ -35,34 +100,53 @@ struct GameData {
 
 // ---------------- [Function declarations begin here] ----------------- //
 
-int  readData(const char* fileName);
-int  writeData(GameData game);
+// Functions for hardware interfacing
 int  updateDisplay(int newDisplayValue);
 int  serializeForDisplay(int newDisplayValue);
-int  getCurrentLight(GameData game);
-bool getRandomDirection(int rngSeed);
+void updateLightStrip(bool lightStates);
+bool buttonIsPressed();
+
+// Functions for file input/output
+int readData(const char* fileName);
+int writeData(GameData game);
+
+// Functions for changing game data
+bool setLives(GameData game, int newNumLives);
 bool startLightCycle(GameData game);
 bool stopLightCycle(GameData game);
-bool buttonIsPressed();
 bool updateLightPosition(GameData game);
 bool updateLightCycleTime(GameData game, int newCycleTime);
-bool setLives(GameData game, int newNumLives);
+bool getRandomDirection(int rngSeed);
 
 // ----------------- [Function declarations end here] ------------------ //
 
 
 
-// ----------------- [Function definitions begin here] ----------------- //
+// -------- [Functions for interfacing with hardware begin here] ------- //
 
-int  readData (const char* fileName) {}
+int updateDisplay(int newDisplayValue) {}
 
-int  writeData(GameData game) {}
+int serializeForDisplay(int newDisplayValue) {}
 
-int  updateDisplay(int newDisplayValue) {}
+bool buttonIsPressed() {}
 
-int  serializeForDisplay(int newDisplayValue) {}
+void updateLightStrip(bool lightStates) {}
 
-int  getCurrentLight(GameData game) {}
+// --------- [Functions for interfacing with hardware end here] -------- //
+
+
+
+// ----------- [Functions for file input/output begin here] ------------ //
+
+int readData(const char* fileName) {}
+
+int writeData(GameData game) {}
+
+// ------------ [Functions for file input/output end here] ------------- //
+
+
+
+// ----------- [Functions for changing game data begin here] ----------- //
 
 bool getRandomDirection(int rngSeed) {}
 
@@ -70,20 +154,28 @@ bool startLightCycle(GameData game) {}
 
 bool stopLightCycle(GameData game) {}
 
-bool buttonIsPressed() {}
-
 bool updateLightPosition(GameData game) {}
 
 bool updateLightCycleTime(GameData game, int newCycleTime) {}
 
 bool setLives(GameData game, int newNumLives) {}
 
-// ------------------ [Function definitions end here] ------------------ //
+// ----------- [Functions for changing game data begin here] ----------- //
 
 
 
 // Set up and run the game:
 int main (const int argc, const char* const argv[]) {
+
+	GameData* game = new GameData;
+	game->currentState = IDLE;
+
+	//Main game loop
+	while (game->currentState != GAME_OVER) {
+		game->currentState = GAME_OVER;
+	}
+
+	delete game;
 
 	return 0;
 }
