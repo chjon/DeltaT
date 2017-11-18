@@ -19,11 +19,14 @@ using namespace std;
 // ------------- [Global constant declarations begin here] ------------- //
 
 enum gameState {IDLE, IN_PLAY, GAME_OVER};
-const char DEFAULT_FILE[] = "game.data";
+const char STAT_FILE[] = "game.stat";
+const char LOG_FILE[] = "game.log";
 const float TIME_PER_LEVEL = 10;                // Time per level in seconds
 const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
 const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
                                                 // a light is on
+const float DEFAULT_PAUSE_TIME = 1;             // Time the game will pause for
+                                                // at the end of a level
 const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights in
                                                 // the strip
 const int TARGET_INDEX = TOTAL_NUM_LIGHTS / 2;  // Index of the target light
@@ -104,6 +107,7 @@ struct GameData {
 	int numLivesRemaining;      // This is the number of attempts remaining
 	int currentLightPosition;   // This is the index of the current light that
 	                            // is turned on
+	bool* lightStates;          // This holds the states of all the lights
 	bool isMovingRight;         // Whether or not the light is moving to the
 	                            // right
 };
@@ -136,11 +140,12 @@ int readData(const char* fileName, Statistics* stats);
 int writeData(const char* fileName, Statistics* stats);
 
 // Functions for changing game data
-void updateLightPosition(GameData* game);
-void updateLightDuration(GameData* game);
-void setRandomDirection (GameData* game);
+bool updateLightPosition(GameData* game);
+bool updateLightDuration(GameData* game);
+bool setRandomDirection (GameData* game);
 
 //Functions for handling game logic
+void sleep(float seconds);
 bool gameLoopIdle(Statistics* stats);
 bool gameLoopPlay(Statistics* stats, GameData* game);
 
@@ -175,7 +180,12 @@ int writeData(const char* fileName, Statistics* stats) {}
 // ----------- [Functions for changing game data begin here] ----------- //
 
 // Get a direction "randomly" based on the time the function is called
-void setRandomDirection(GameData* game) {
+bool setRandomDirection(GameData* game) {
+	// Check for null pointer
+	if (game == NULL) {
+		return false;
+	}
+
 	bool isMovingRight = (clock() % 2 == 0);
 
 	//Set direction
@@ -187,32 +197,53 @@ void setRandomDirection(GameData* game) {
 	} else {
 		game->currentLightPosition = TOTAL_NUM_LIGHTS - 1;
 	}
+
+	return true;
 }
 
 // Move the light to its next position (cyclic)
-void updateLightPosition(GameData* game) {
-	//Move current light to the right
+bool updateLightPosition(GameData* game) {
+	// Check for null pointer
+	if (game == NULL) {
+		return false;
+	}
+
+	// Move current light to the right
 	if (game->isMovingRight) {
 		game->currentLightPosition += 1;
 		game->currentLightPosition %= TOTAL_NUM_LIGHTS;
 
-	//Move current light to the left
+	// Move current light to the left
 	} else {
 		game->currentLightPosition += TOTAL_NUM_LIGHTS - 1;
 		game->currentLightPosition %= TOTAL_NUM_LIGHTS;
 	}
 
-	//Reset light timer
+	// Reset light timer
 	game->lightTimer->setStopTime(game->timePerLight);
+
+	return true;
 }
 
 // Update the length of time for which a light is on
-void updateLightDuration(GameData* game) {
+bool updateLightDuration(GameData* game) {
+	// Check for null pointer
+	if (game == NULL) {
+		return false;
+	}
+
 	game->timePerLight *= SCALING_TIME_PER_LIGHT;
+
+	return true;
 }
 
 // Reset the game
 bool reset(GameData* game) {
+	// Check for null pointer
+	if (game == NULL) {
+		return false;
+	}
+
 	game->currentState = IDLE;
 	game->timePerLevel = TIME_PER_LEVEL;
 	game->timePerLight = INITIAL_TIME_PER_LIGHT;
@@ -220,17 +251,40 @@ bool reset(GameData* game) {
 	game->lightTimer = new Timer;
 	game->currentLevel = 0;
 	game->numLivesRemaining = INITIAL_NUM_LIVES;
+
+	// Initialize array if it does not already exist
+	if (game->lightStates == NULL) {
+		game->lightStates[TOTAL_NUM_LIGHTS];
+
+	// Clear array if it already exists
+	} else {
+		for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+			game->lightStates[i] = false;
+		}
+	}
+
+	return true;
 }
 
-// ----------- [Functions for changing game data begin here] ----------- //
+// ------------ [Functions for changing game data end here] ------------ //
 
 
 
 // ----------- [Functions for handling game logic begin here] ---------- //
 
+// Do nothing for some number of seconds
+void sleep (float seconds) {
+	Timer* t = new Timer;
+	t->setStopTime(seconds);
+
+	while (!t->isFinished());
+
+	delete t;
+}
+
 // Do nothing until the button is pressed
 bool gameLoopIdle(Statistics* stats) {
-	// Check for null objects
+	// Check for null pointer
 	if (stats == NULL) {
 		return false;
 	}
@@ -244,7 +298,7 @@ bool gameLoopIdle(Statistics* stats) {
 
 // Play the game
 bool gameLoopPlay(Statistics* stats, GameData* game) {
-	// Check for null objects
+	// Check for null pointers
 	if (stats == NULL || game == NULL) {
 		return false;
 	}
@@ -257,36 +311,43 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 		// Loop through levels until the level is failed
 		while (passedLevel) {
+			// Set the display
 			updateDisplay(game->currentLevel);
 
 			bool levelEnded = false;
+
+			// Set initial timer values
 			game->lightTimer->setStopTime(game->timePerLight);
 			game->levelTimer->setStopTime(game->timePerLevel);
 
-			// Loop through lights until the level is failed
+			// Loop through lights until the level is finished
 			while (!levelEnded && !game->levelTimer->isFinished()) {
 
-				// Check for light update
+				// Update lights if it is time to update the lights
 				if (game->lightTimer->isFinished()) {
 					game->lightTimer->setStopTime(game->timePerLight);
-
 					updateLightPosition(game);
 				}
 
 				// Check for button press
 				if (buttonIsPressed()) {
 
-					// Check if the correct light is on
+					// Signify that the game has failed if the
+					// incorrect light is on
 					if (game->currentLightPosition != TARGET_INDEX) {
 						passedLevel = false;
-					} else {
-						updateLightDuration(game);
-						setRandomDirection(game);
 					}
 
 					levelEnded = true;
 				}
 			}
+
+			// Pause for a moment
+			sleep(DEFAULT_PAUSE_TIME);
+
+			// Speed up level
+			updateLightDuration(game);
+			setRandomDirection(game);
 
 			// Update current level
 			game->currentLevel++;
@@ -310,5 +371,15 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 // Set up and run the game:
 int main (const int argc, const char* const argv[]) {
+	Statistics* stats = new Statistics;
+	GameData* game = new GameData;
+
+	reset(game);
+
+	gameLoopIdle(stats);
+	gameLoopPlay(stats, game);
+
+	delete game;
+
 	return 0;
 }
