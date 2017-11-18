@@ -20,6 +20,14 @@ using namespace std;
 
 enum gameState {IDLE, IN_PLAY, GAME_OVER};
 const char DEFAULT_FILE[] = "game.data";
+const float TIME_PER_LEVEL = 10;                // Time per level in seconds
+const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
+const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
+                                                // a light is on
+const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights in
+                                                // the strip
+const int TARGET_INDEX = TOTAL_NUM_LIGHTS / 2;  // Index of the target light
+const int INITIAL_NUM_LIVES = 3;                // Initial number of lives
 
 // -------------- [Global constant declarations end here] -------------- //
 
@@ -78,23 +86,40 @@ class Timer {
 
 
 
+// ----------------- [Structure definitions begin here] ---------------- //
+
 // Structure for holding data about the game
 struct GameData {
 	gameState currentState;     // This indicates the current state of the game
-	int highScore;              // This stores the most times the button was
-	                            // pressed at the right time during a game
+	float timePerLevel;         // This is the duration in seconds for which a
+	                            // level lasts
+	float timePerLight;         // This is the duration in seconds for which a
+								// light should be on
+	Timer* levelTimer;          // This is the timer for the length of a level
+	Timer* lightTimer;          // This is the timer for the duration a light
+	                            // is on
 	int currentLevel;           // This counts the number of times the button
-	                            // was pressed at the right time during the
+								// was pressed at the right time during the
 								// current game
 	int numLivesRemaining;      // This is the number of attempts remaining
 	int currentLightPosition;   // This is the index of the current light that
-                                // is turned on
-	int cycleTime;              // This is the minimum amount of time that must
-	                            // pass before the light can switch
-	float timePerLight;         // This is the duration in seconds for which a
-	                            // light should be on
-	bool direction;             // true/false -> left/right
+	                            // is turned on
+	bool isMovingRight;         // Whether or not the light is moving to the
+	                            // right
 };
+
+
+
+// Structure for holding statistics about the game
+struct Statistics {
+	int highScore;              // This is the highest level reached
+	float totalTimePlayed;      // This is the total length of time the game
+	                            // has been played
+	int timesPressed;           // This is the total number of times the button
+	                            // has been pressed
+};
+
+// ------------------ [Structure definitions end here] ----------------- //
 
 
 
@@ -107,16 +132,17 @@ void updateLightStrip(bool lightStates);
 bool buttonIsPressed();
 
 // Functions for file input/output
-int readData(const char* fileName);
-int writeData(GameData game);
+int readData(const char* fileName, Statistics* stats);
+int writeData(const char* fileName, Statistics* stats);
 
 // Functions for changing game data
-bool setLives(GameData game, int newNumLives);
-bool startLightCycle(GameData game);
-bool stopLightCycle(GameData game);
-bool updateLightPosition(GameData game);
-bool updateLightCycleTime(GameData game, int newCycleTime);
-bool getRandomDirection(int rngSeed);
+void updateLightPosition(GameData* game);
+void updateLightDuration(GameData* game);
+void setRandomDirection (GameData* game);
+
+//Functions for handling game logic
+bool gameLoopIdle(Statistics* stats);
+bool gameLoopPlay(Statistics* stats, GameData* game);
 
 // ----------------- [Function declarations end here] ------------------ //
 
@@ -138,9 +164,9 @@ void updateLightStrip(bool lightStates) {}
 
 // ----------- [Functions for file input/output begin here] ------------ //
 
-int readData(const char* fileName) {}
+int readData(const char* fileName, Statistics* stats) {}
 
-int writeData(GameData game) {}
+int writeData(const char* fileName, Statistics* stats) {}
 
 // ------------ [Functions for file input/output end here] ------------- //
 
@@ -148,34 +174,141 @@ int writeData(GameData game) {}
 
 // ----------- [Functions for changing game data begin here] ----------- //
 
-bool getRandomDirection(int rngSeed) {}
+// Get a direction "randomly" based on the time the function is called
+void setRandomDirection(GameData* game) {
+	bool isMovingRight = (clock() % 2 == 0);
 
-bool startLightCycle(GameData game) {}
+	//Set direction
+	game->isMovingRight = isMovingRight;
 
-bool stopLightCycle(GameData game) {}
+	//Set position according to direction
+	if (isMovingRight) {
+		game->currentLightPosition = 0;
+	} else {
+		game->currentLightPosition = TOTAL_NUM_LIGHTS - 1;
+	}
+}
 
-bool updateLightPosition(GameData game) {}
+// Move the light to its next position (cyclic)
+void updateLightPosition(GameData* game) {
+	//Move current light to the right
+	if (game->isMovingRight) {
+		game->currentLightPosition += 1;
+		game->currentLightPosition %= TOTAL_NUM_LIGHTS;
 
-bool updateLightCycleTime(GameData game, int newCycleTime) {}
+	//Move current light to the left
+	} else {
+		game->currentLightPosition += TOTAL_NUM_LIGHTS - 1;
+		game->currentLightPosition %= TOTAL_NUM_LIGHTS;
+	}
 
-bool setLives(GameData game, int newNumLives) {}
+	//Reset light timer
+	game->lightTimer->setStopTime(game->timePerLight);
+}
+
+// Update the length of time for which a light is on
+void updateLightDuration(GameData* game) {
+	game->timePerLight *= SCALING_TIME_PER_LIGHT;
+}
+
+// Reset the game
+bool reset(GameData* game) {
+	game->currentState = IDLE;
+	game->timePerLevel = TIME_PER_LEVEL;
+	game->timePerLight = INITIAL_TIME_PER_LIGHT;
+	game->levelTimer = new Timer;
+	game->lightTimer = new Timer;
+	game->currentLevel = 0;
+	game->numLivesRemaining = INITIAL_NUM_LIVES;
+}
 
 // ----------- [Functions for changing game data begin here] ----------- //
 
 
 
-// Set up and run the game:
-int main (const int argc, const char* const argv[]) {
+// ----------- [Functions for handling game logic begin here] ---------- //
 
-	GameData* game = new GameData;
-	game->currentState = IDLE;
-
-	//Main game loop
-	while (game->currentState != GAME_OVER) {
-		game->currentState = GAME_OVER;
+// Do nothing until the button is pressed
+bool gameLoopIdle(Statistics* stats) {
+	// Check for null objects
+	if (stats == NULL) {
+		return false;
 	}
 
-	delete game;
+	updateDisplay(stats->highScore);
 
+	while (!buttonIsPressed());
+
+	return true;
+}
+
+// Play the game
+bool gameLoopPlay(Statistics* stats, GameData* game) {
+	// Check for null objects
+	if (stats == NULL || game == NULL) {
+		return false;
+	}
+
+	reset(game);
+
+	// Loop until there are no lives remaining
+	while (game->numLivesRemaining > 0) {
+		bool passedLevel = true;
+
+		// Loop through levels until the level is failed
+		while (passedLevel) {
+			updateDisplay(game->currentLevel);
+
+			bool levelEnded = false;
+			game->lightTimer->setStopTime(game->timePerLight);
+			game->levelTimer->setStopTime(game->timePerLevel);
+
+			// Loop through lights until the level is failed
+			while (!levelEnded && !game->levelTimer->isFinished()) {
+
+				// Check for light update
+				if (game->lightTimer->isFinished()) {
+					game->lightTimer->setStopTime(game->timePerLight);
+
+					updateLightPosition(game);
+				}
+
+				// Check for button press
+				if (buttonIsPressed()) {
+
+					// Check if the correct light is on
+					if (game->currentLightPosition != TARGET_INDEX) {
+						passedLevel = false;
+					} else {
+						updateLightDuration(game);
+						setRandomDirection(game);
+					}
+
+					levelEnded = true;
+				}
+			}
+
+			// Update current level
+			game->currentLevel++;
+
+			// Update high score
+			if (game->currentLevel > stats->highScore) {
+				stats->highScore = game->currentLevel;
+			}
+		}
+
+		// Decrement number of lives
+		game->numLivesRemaining--;
+	}
+
+	return true;
+}
+
+// ------------ [Functions for handling game logic end here] ----------- //
+
+
+
+// Set up and run the game:
+int main (const int argc, const char* const argv[]) {
 	return 0;
 }
