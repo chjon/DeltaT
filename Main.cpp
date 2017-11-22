@@ -19,14 +19,16 @@ using namespace std;
 // ------------- [Global constant declarations begin here] ------------- //
 
 enum gameState {IDLE, IN_PLAY, GAME_OVER};
-const char STAT_FILE[] = "deltaT.stat";           // Name of the statistics file
-const char LOG_FILE[] = "deltaT.log";             // Name of the log file
+const char STAT_FILE[] = "deltaT.stat";         // Name of the statistics file
+const char LOG_FILE[] = "deltaT.log";           // Name of the log file
 const float TIME_PER_LEVEL = 10;                // Time per level in seconds
 const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
 const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
                                                 // a light is on
 const float DEFAULT_PAUSE_TIME = 1;             // Time the game will pause for
                                                 // at the end of a level
+const float MAX_IDLE_TIME = 120;                // Time for which the game will
+                                                // idle before exiting
 const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights in
                                                 // the strip
 const int TARGET_INDEX = TOTAL_NUM_LIGHTS / 2;  // Index of the target light
@@ -221,11 +223,16 @@ int serializeForDisplay(int newDisplayValue) {
 		"[serializeForDisplay] Serializing " << newDisplayValue << endl;
 }
 
+// Ask hardware if the button is pressed
 bool buttonIsPressed() {
-	sysLog.sysLog <<
-		"[buttonIsPressed] Button is pressed" << endl;
+	if (false) {
+		sysLog.sysLog <<
+			"[buttonIsPressed] Button is pressed" << endl;
 
-	return true;
+		return true;
+	}
+
+	return false;
 }
 
 void updateLightStrip(bool lightStates) {
@@ -302,13 +309,13 @@ bool setRandomDirection(GameData* game) {
 
 	bool isMovingRight = (clock() % 2 == 0);
 
-	//Set direction
+	// Set direction
 	game->isMovingRight = isMovingRight;
 	sysLog.sysLog <<
 		"[setRandomDirection] Direction set to " <<
 		((isMovingRight) ? ("right") : ("left")) << endl;
 
-	//Set position according to direction
+	// Set position according to direction
 	if (isMovingRight) {
 		game->currentLightPosition = 0;
 	} else {
@@ -448,15 +455,31 @@ bool gameLoopIdle(Statistics* stats) {
 
 	updateDisplay(stats->highScore);
 
+	Timer* t = new Timer;
+
 	sysLog.sysLog <<
 		"[gameLoopIdle] Waiting for button press" << endl;
 
-	while (!buttonIsPressed());
+	t->setStopTime(MAX_IDLE_TIME);
 
-	sysLog.sysLog <<
-		"[gameLoopIdle] Button press detected - exiting idle state" << endl;
+	while (!buttonIsPressed() && !t->isFinished());
 
-	return true;
+	if (!t->isFinished()) {
+		delete t;
+
+		sysLog.sysLog <<
+			"[gameLoopIdle] Button press detected - exiting idle state" << endl;
+
+		return true;
+	} else {
+		delete t;
+
+		sysLog.sysLog <<
+			"[gameLoopIdle] The button was not pressed for " <<
+			MAX_IDLE_TIME << " second(s) - exiting game" << endl;
+
+		return false;
+	}
 }
 
 // Play the game
@@ -588,7 +611,11 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 			game->numLivesRemaining << endl;
 	}
 
-	sysLog.sysLog << "[gameLoopPlay] Exiting life loop" << endl;
+	sysLog.sysLog <<
+		"[gameLoopPlay] Exiting life loop" << endl;
+	sysLog.sysLog <<
+		"[gameLoopPlay] Game ended with final score "
+		<< game->currentLevel << endl;
 
 	return true;
 }
@@ -604,8 +631,10 @@ int main (const int argc, const char* const argv[]) {
 
 	reset(game);
 
-	gameLoopIdle(stats);
-	gameLoopPlay(stats, game);
+	//Loop while the game has not been idle for MAX_IDLE_TIME
+	while (gameLoopIdle(stats)) {
+		gameLoopPlay(stats, game);
+	}
 
 	delete game;
 
