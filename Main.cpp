@@ -25,7 +25,7 @@ const float TIME_PER_LEVEL = 10;                // Time per level in seconds
 const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
 const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
                                                 // a light is on
-const float DEFAULT_PAUSE_TIME = 1;             // Time the game will pause for
+const float DEFAULT_PAUSE_TIME = 0.5;           // Time the game will pause for
                                                 // at the end of a level
 const float MAX_IDLE_TIME = 120;                // Time for which the game will
                                                 // idle before exiting
@@ -442,6 +442,9 @@ void sleep (float seconds) {
 
 // Do nothing until the button is pressed
 bool gameLoopIdle(Statistics* stats) {
+	sysLog.sysLog <<
+		"[gameLoopIdle] Entered gameLoopIdle state" << endl;
+
 	// Check for null pointer
 	if (stats == NULL) {
 		sysLog.sysLog <<
@@ -484,6 +487,9 @@ bool gameLoopIdle(Statistics* stats) {
 
 // Play the game
 bool gameLoopPlay(Statistics* stats, GameData* game) {
+	sysLog.sysLog <<
+		"[gameLoopPlay] Entered gameLoopPlay state" << endl;
+
 	// Check for null pointers
 	if (stats == NULL || game == NULL) {
 		sysLog.sysLog <<
@@ -516,6 +522,7 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 			updateDisplay(game->currentLevel);
 
 			bool levelEnded = false;
+			passedLevel = false;
 
 			// Set initial timer values
 			sysLog.sysLog <<
@@ -540,9 +547,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 				}
 
 				// Check for button press
-				sysLog.sysLog <<
-					"[gameLoopPlay] Checking for button press" << endl;
-
 				if (buttonIsPressed()) {
 					sysLog.sysLog <<
 						"[gameLoopPlay] Button press detected" << endl;
@@ -557,6 +561,12 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 					}
 
 					levelEnded = true;
+				}
+
+				// Level has failed if time runs out
+				if (game->levelTimer->isFinished()) {
+					levelEnded = true;
+					passedLevel = false;
 				}
 			}
 
@@ -633,6 +643,7 @@ int main (const int argc, const char* const argv[]) {
 
 	//Loop while the game has not been idle for MAX_IDLE_TIME
 	while (gameLoopIdle(stats)) {
+		sleep(DEFAULT_PAUSE_TIME);
 		gameLoopPlay(stats, game);
 	}
 
