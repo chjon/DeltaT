@@ -443,7 +443,9 @@ bool gameLoopIdle(Statistics* stats) {
 		return false;
 	}
 
-	sysLog.sysLog << "[gameLoopIdle] Updating display" << endl;
+	sysLog.sysLog <<
+		"[gameLoopIdle] Updating display" << endl;
+
 	updateDisplay(stats->highScore);
 
 	sysLog.sysLog <<
@@ -461,7 +463,8 @@ bool gameLoopIdle(Statistics* stats) {
 bool gameLoopPlay(Statistics* stats, GameData* game) {
 	// Check for null pointers
 	if (stats == NULL || game == NULL) {
-		sysLog.sysLog << "[gameLoopPlay] ERROR: Null pointer detected" << endl;
+		sysLog.sysLog <<
+			"[gameLoopPlay] ERROR: Null pointer detected" << endl;
 
 		return false;
 	}
@@ -544,29 +547,35 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 			sleep(DEFAULT_PAUSE_TIME);
 
-			// Speed up level
-			sysLog.sysLog <<
-				"[gameLoopPlay] Speed up level" << endl;
-			updateLightDuration(game);
+			//Check if passedLevel
+			if (passedLevel) {
+				sysLog.sysLog <<
+					"[gameLoopPlay] Level passed" << endl;
+
+				// Speed up level
+				sysLog.sysLog <<
+					"[gameLoopPlay] Speed up level" << endl;
+				updateLightDuration(game);
+
+				// Update current level
+				game->currentLevel++;
+				sysLog.sysLog <<
+					"[gameLoopPlay] Current level set to "
+					<< game->currentLevel << endl;
+
+				// Update high score
+				if (game->currentLevel > stats->highScore) {
+					stats->highScore = game->currentLevel;
+
+					sysLog.sysLog <<
+						"[gameLoopPlay] Updated high score to " <<
+						stats->highScore << endl;
+				}
+			}
 
 			sysLog.sysLog <<
 				"[gameLoopPlay] Set random direction" << endl;
 			setRandomDirection(game);
-
-			// Update current level
-			game->currentLevel++;
-			sysLog.sysLog <<
-				"[gameLoopPlay] Current level set to "
-				<< game->currentLevel << endl;
-
-			// Update high score
-			if (game->currentLevel > stats->highScore) {
-				stats->highScore = game->currentLevel;
-
-				sysLog.sysLog <<
-					"[gameLoopPlay] Updated high score to " <<
-					stats->highScore << endl;
-			}
 		}
 
 		sysLog.sysLog <<
@@ -592,10 +601,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 int main (const int argc, const char* const argv[]) {
 	Statistics* stats = new Statistics;
 	GameData* game = new GameData;
-
-	/*if (readStats(STAT_FILE, stats)) {
-
-	}*/
 
 	reset(game);
 
