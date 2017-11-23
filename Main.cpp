@@ -149,8 +149,6 @@ struct Statistics {
 // ---------------- [Function declarations begin here] ----------------- //
 
 // Functions for hardware interfacing
-int  updateDisplay(int newDisplayValue);
-int  serializeForDisplay(int newDisplayValue);
 void updateLightStrip(bool lightStates);
 bool buttonIsPressed();
 
@@ -212,17 +210,6 @@ bool Timer::isFinished () {
 
 // -------- [Functions for interfacing with hardware begin here] ------- //
 
-int updateDisplay(int newDisplayValue) {
-	sysLog.sysLog <<
-		"[updateDisplay] Updating display to " <<
-		 newDisplayValue << endl;
-}
-
-int serializeForDisplay(int newDisplayValue) {
-	sysLog.sysLog <<
-		"[serializeForDisplay] Serializing " << newDisplayValue << endl;
-}
-
 // Ask hardware if the button is pressed
 bool buttonIsPressed() {
 	if (false) {
@@ -235,6 +222,7 @@ bool buttonIsPressed() {
 	return false;
 }
 
+// Update which lights are on/off
 void updateLightStrip(bool lightStates) {
 	sysLog.sysLog <<
 		"[updateLightStrip] Updated light strip" << endl;
@@ -393,8 +381,8 @@ bool reset(GameData* game) {
 	game->currentState = IDLE;
 	game->timePerLevel = TIME_PER_LEVEL;
 	game->timePerLight = INITIAL_TIME_PER_LIGHT;
-	game->levelTimer = new Timer;
-	game->lightTimer = new Timer;
+	game->levelTimer   = new Timer;
+	game->lightTimer   = new Timer;
 	game->currentLevel = 0;
 	game->numLivesRemaining = INITIAL_NUM_LIVES;
 
