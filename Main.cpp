@@ -18,9 +18,12 @@ using namespace std;
 
 // ------------- [Global constant declarations begin here] ------------- //
 
+const char STAT_FILE[] =                        // Name of the statistics file
+	"deltaT.stat";
+const char LOG_FILE[] =                         // Name of the log file
+	"deltaT.log";
+
 enum gameState {IDLE, IN_PLAY, GAME_OVER};
-const char STAT_FILE[] = "deltaT.stat";         // Name of the statistics file
-const char LOG_FILE[] = "deltaT.log";           // Name of the log file
 const float TIME_PER_LEVEL = 10;                // Time per level in seconds
 const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
 const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
@@ -29,8 +32,8 @@ const float DEFAULT_PAUSE_TIME = 0.5;           // Time the game will pause for
                                                 // at the end of a level
 const float MAX_IDLE_TIME = 120;                // Time for which the game will
                                                 // idle before exiting
-const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights in
-                                                // the strip
+const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights
+                                                // in the strip
 const int TARGET_INDEX = TOTAL_NUM_LIGHTS / 2;  // Index of the target light
 const int INITIAL_NUM_LIVES = 3;                // Initial number of lives
 const int MAX_LINE_LENGTH = 100;                // Length of a line in a file
@@ -84,6 +87,7 @@ class Logger {
 	public:
 		std::ofstream sysLog;
 
+		// Constructor
 		Logger () {
 			// Create log file
 			sysLog.open(LOG_FILE);
@@ -103,8 +107,53 @@ class Logger {
 
 
 
+// ------------------ [GPIO Handler class begins here] ----------------- //
+
+/*************************************************************************
+	This class handles GPIO interfacing for a single pin
+ *************************************************************************/
+
+class GPIOHandler {
+	private:
+		const char* const GPIO_EXPORT =    // Name of the file for
+			"sys/class/gpio/export";      // activating a GPIO pin
+		const char* GPIO_UNEXPORT =        // Name of the file for
+			"sys/class/gpio/unexport";    // deactivating a GPIO pin
+		const char* GPIO_DIRECTORY =       // Prefix for the directory for
+			"sys/class/gpio/gpio";        // controlling a GPIO pin
+
+		char* directoryName;    // Directory for controlling a GPIO pin
+		int   pinID;            // Identifier for addressing pin
+		bool  IOStreamIsOpen;   // Marker for whether the GPIO pin IO stream
+		                        // is open
+
+		ifstream inFile;        // File for generic file reading
+		ofstream outFile;       // File for generic file writing
+
+		bool stringFromInt(int num, char*& output);
+		int  getLength(const char* string);
+		bool concatenate(const char* string1, const char* string2, char*& output);
+
+	public:
+		GPIOHandler(int pinID);
+		GPIOHandler();
+		~GPIOHandler();
+		bool activate();
+		bool deactivate();
+		bool setType(bool isInput);
+		bool getState(bool& state);
+		bool setState(bool isOn);
+};
+
+// ------------------- [GPIO Handler class ends here] ------------------ //
+
+
+
 // Global log object
 Logger sysLog;
+
+// Global GPIOHandlers
+GPIOHandler* systemPins[TOTAL_NUM_PINS];
 
 
 
@@ -208,13 +257,462 @@ bool Timer::isFinished () {
 
 
 
+// --------- [Functions for the GPIOHandler class begin here] ---------- //
+
+// Helper function for GPIOHandler constructor
+// Get string representation of int
+bool GPIOHandler::stringFromInt (int num, char*& output) {
+	sysLog.sysLog << "[GPIOHandler::stringFromInt] " <<
+		"Entered function" << endl;
+
+	// Reject negative numbers
+	if (num < 0) {
+		sysLog.sysLog << "[GPIOHandler::stringFromInt] " <<
+			"ERROR: Received negative number" << endl;
+
+		return false;
+
+	// Handle the 0 case
+	} else if (num == 0) {
+		output = new char[2];
+		output[0] = '0';
+		output[1] = 0;
+	} else {
+		int length = floor(log10(num) + 1) + 1;
+		output = new char[length];
+
+		// Null-terminate the string
+		output[length - 1] = 0;
+
+		// Add each digit to the string
+		for (int i = 1; i <= length; i++) {
+			output[length - i - 1] = (num % 10) + '0';
+			num /= 10;
+		}
+	}
+
+	sysLog.sysLog << "[GPIOHandler::stringFromInt] " <<
+		"Received " << num << "; outputting \"" << output << "\"" << endl;
+
+	return true;
+}
+
+// Helper function for GPIOHandler::concatenate
+// Get number of characters in a string
+int GPIOHandler::getLength (const char* string) {
+	sysLog.sysLog << "[GPIOHandler::getLength] " <<
+		"Entered function" << endl;
+
+	// Check for null array
+	if (string == NULL) {
+		sysLog.sysLog << "[GPIOHandler::getLength] " <<
+			"ERROR: Received null string" << endl;
+
+		return -1;
+	}
+
+	int length = 0;
+
+	// Count number of non-null characters
+	while (string[length] != 0) {
+		length++;
+	}
+
+	sysLog.sysLog << "[GPIOHandler::getLength] " <<
+		"Received string of " << length << " characters" << endl;
+
+	return length;
+}
+
+// Helper function for GPIOHandler constructor
+// Concatenate strings
+bool GPIOHandler::concatenate (const char* string1,
+		const char* string2, char*& output) {
+
+	sysLog.sysLog << "[GPIOHandler::concatenate] " <<
+		"Entered function" << endl;
+
+	int outputStringIndex = 0;
+	int inputStringIndex  = 0;
+
+	// Check for null pointers
+	if (string1 == NULL || string2 == NULL) {
+		sysLog.sysLog << "[GPIOHandler::concatenate] " <<
+			"Error: Received null string" << endl;
+
+		return false;
+	}
+
+	int length = getLength(string1) + getLength(string2) + 1;
+
+	output = new char[length];
+
+	// Copy string1 into outputString
+	while (string1[inputStringIndex] != 0) {
+		output[outputStringIndex] = string1[inputStringIndex];
+		outputStringIndex++;
+		inputStringIndex ++;
+	}
+
+	inputStringIndex = 0;
+
+	// Copy string2 into outputString
+	while (string2[inputStringIndex] != 0) {
+		output[outputStringIndex] = string2[inputStringIndex];
+		outputStringIndex++;
+		inputStringIndex ++;
+	}
+
+	// Null-terminate the string
+	output[outputStringIndex] = 0;
+
+	sysLog.sysLog << "[GPIOHandler::concatenate] " <<
+		"Concatenated string: \"" << output << "\"" << endl;
+
+	return true;
+}
+
+// GPIOHandler constructor given pinID
+GPIOHandler::GPIOHandler (int pinID) {
+	sysLog.sysLog << "[GPIOHandler::GPIOHandler] " <<
+		"Entered constructor" << endl;
+
+	this->IOStreamIsOpen = false;
+	char* idString;
+
+	// Handle invalid ID
+	if (!stringFromInt(pinID, idString) ||
+			!concatenate(GPIO_DIRECTORY, idString, this->directoryName)) {
+
+		sysLog.sysLog << "[GPIOHandler::GPIOHandler] " <<
+			"ERROR: Received invalid pinID: " << pinID << endl;
+
+		this->pinID = -1;
+	} else {
+
+		this->pinID = pinID;
+	}
+}
+
+// Default GPIOHandler constructor
+GPIOHandler::GPIOHandler () {
+	sysLog.sysLog << "[GPIOHandler::GPIOHandler] " <<
+		"Entered constructor" << endl;
+
+	this->IOStreamIsOpen = false;
+	this->pinID = -1;
+	this->directoryName = NULL;
+}
+
+// GPIOHandler deconstructor
+GPIOHandler::~GPIOHandler () {
+	delete directoryName;
+	directoryName = NULL;
+	pinID = -1;
+
+	if (inFile.is_open()) {
+		inFile.close();
+	}
+
+	if (outFile.is_open()) {
+		outFile.close();
+	}
+}
+
+// Activate GPIO pin
+bool GPIOHandler::activate () {
+	sysLog.sysLog << "[GPIOHandler::activate] " <<
+		"Entered function" << endl;
+
+	// Check if object is valid
+	if (pinID < 0) {
+		sysLog.sysLog << "[GPIOHandler::activate] " <<
+			"ERROR: Received invalid pinID: " << pinID << endl;
+
+		return false;
+	}
+
+	// Check if pin has already been activated
+	inFile.open(directoryName);
+
+	if (inFile.is_open()) {
+		sysLog.sysLog << "[GPIOHandler::activate] " <<
+			"ERROR: GPIO pin has already been activated" << endl;
+
+		return false;
+	}
+
+	inFile.close();
+	outFile.open(GPIO_EXPORT);
+
+	// Check if export file was successfully opened
+	if (!outFile.is_open()) {
+		sysLog.sysLog << "[GPIOHandler::activate] " <<
+			"ERROR: Could not open " << GPIO_EXPORT << endl;
+
+		return false;
+	}
+
+	// Activate GPIO pin
+	char* stringID;
+
+	sysLog.sysLog << "[GPIOHandler::activate] " <<
+		"Getting pinID as a string" << endl;
+
+	// Check for valid pinID
+	if (!stringFromInt(pinID, stringID)) {
+		sysLog.sysLog << "[GPIOHandler::activate] " <<
+			"ERROR: Received invalid pinID " << endl;
+
+		return false;
+	}
+
+	outFile << stringID;
+	outFile.close();
+
+	return true;
+}
+
+// Deactivate GPIO pin
+bool GPIOHandler::deactivate () {
+	sysLog.sysLog << "[GPIOHandler::deactivate] " <<
+		"Entered function" << endl;
+
+	// Check if object is valid
+	if (pinID < 0) {
+		sysLog.sysLog << "[GPIOHandler::deactivate] " <<
+			"ERROR: Received invalid pinID: " << pinID << endl;
+
+		return false;
+	}
+
+	// Check if pin has already been deactivated
+	inFile.open(directoryName);
+
+	if (!inFile.is_open()) {
+		sysLog.sysLog << "[GPIOHandler::deactivate] " <<
+			"ERROR: GPIO pin has already been deactivated" << endl;
+
+		return false;
+	}
+
+	inFile.close();
+
+	if (outFile.is_open()) {
+		outFile.close();
+	}
+
+	outFile.open(GPIO_UNEXPORT);
+
+	// Check if export file was successfully opened
+	if (!outFile.is_open()) {
+		sysLog.sysLog << "[GPIOHandler::deactivate] " <<
+			"ERROR: Could not open " << GPIO_UNEXPORT << endl;
+
+		return false;
+	}
+
+	// Deactivate GPIO pin
+	char* stringID;
+
+	sysLog.sysLog << "[GPIOHandler::deactivate] " <<
+		"Getting pinID as a string" << endl;
+
+	stringFromInt(pinID, stringID);
+	outFile << stringID;
+	outFile.close();
+
+	return true;
+}
+
+// Desginate GPIO pin to be either input or output
+bool GPIOHandler::setType (bool isInput) {
+	const char* IO_DIRECTION_FILE =
+		"/direction";
+
+	sysLog.sysLog << "[GPIOHandler::setType] " <<
+		"Entered function" << endl;
+
+	// Check if object is valid
+	if (pinID < 0) {
+		sysLog.sysLog << "[GPIOHandler::setType] " <<
+			"ERROR: Received invalid pinID: " << pinID << endl;
+
+		return false;
+	}
+
+	char* directionFileName;
+
+	sysLog.sysLog << "[GPIOHandler::setType] " <<
+		"Building path name" << endl;
+
+	// Check if path name was built correctly
+	if (!concatenate(directoryName, IO_DIRECTION_FILE, directionFileName)) {
+		sysLog.sysLog << "[GPIOHandler::setType] " <<
+			"ERROR: Path name could not be built" << endl;
+
+		return false;
+	}
+
+	outFile.open(directionFileName);
+
+	// Check if file was opened properly
+	if (!outFile.is_open()) {
+		sysLog.sysLog << "[GPIOHandler::setType] " <<
+			"ERROR: IO direction file could not be opened" << endl;
+
+		return false;
+	}
+
+	if (isInput) {
+		outFile << "in";
+	} else {
+		outFile << "out";
+	}
+
+	sysLog.sysLog << "[GPIOHandler::setType] " <<
+		"GPIO pin set to " << ((isInput) ? ("input") : ("output")) << endl;
+
+	outFile.close();
+
+	return true;
+}
+
+// Get state of pin
+bool GPIOHandler::getState (bool& isOn) {
+	const char* IO_VALUE_FILE =
+		"/value";
+
+	sysLog.sysLog << "[GPIOHandler::getState] " <<
+		"Entered function" << endl;
+
+	// Check if object is valid
+	if (pinID < 0) {
+		sysLog.sysLog << "[GPIOHandler::getState] " <<
+			"ERROR: Received invalid pinID: " << pinID << endl;
+
+		return false;
+	}
+
+	// Check if IOStream is already open
+	if (!IOStreamIsOpen) {
+		// Build path name
+		char* valueFileName;
+
+		sysLog.sysLog << "[GPIOHandler::getState] " <<
+			"Building path name" << endl;
+
+		if (!concatenate(directoryName, IO_VALUE_FILE, valueFileName)) {
+			sysLog.sysLog << "[GPIOHandler::getState] " <<
+				"ERROR: path name could not be built" << endl;
+
+			return false;
+		}
+
+		sysLog.sysLog << "[GPIOHandler::getState] " <<
+			"Opening input file" << endl;
+
+		inFile.open(valueFileName);
+
+		// Check if file could be opened
+		if (!inFile.is_open()) {
+			sysLog.sysLog << "[GPIOHandler::getState] " <<
+				"ERROR: File could not be opened" << endl;
+
+			return false;
+		}
+
+		IOStreamIsOpen = true;
+	}
+
+	// Read value from file
+	char* line = new char[MAX_LINE_LENGTH];
+
+	// Check if value can be read
+	if (!inFile.getline(line, MAX_LINE_LENGTH)) {
+		sysLog.sysLog << "[GPIOHandler::getState] " <<
+			"ERROR: Value could not be read" << endl;
+
+		return false;
+	}
+
+	sysLog.sysLog << "[GPIOHandler::getState] " <<
+		"Read value \"" << line << "\"" << endl;
+
+	isOn = (line[0] == '1');
+
+	return true;
+}
+
+// Set state of pin
+bool GPIOHandler::setState (bool isOn) {
+	const char* IO_VALUE_FILE =
+		"/value";
+
+	sysLog.sysLog << "[GPIOHandler::setState] " <<
+		"Entered function" << endl;
+
+	// Check if object is valid
+	if (pinID < 0) {
+		sysLog.sysLog << "[GPIOHandler::setState] " <<
+			"ERROR: Received invalid pinID: " << pinID << endl;
+
+		return false;
+	}
+
+	// Check if IOStream is already open
+	if (!IOStreamIsOpen) {
+		// Build path name
+		char* valueFileName;
+
+		sysLog.sysLog << "[GPIOHandler::setState] " <<
+			"Building path name" << endl;
+
+		if (!concatenate(directoryName, IO_VALUE_FILE, valueFileName)) {
+			sysLog.sysLog << "[GPIOHandler::setState] " <<
+				"ERROR: path name could not be built" << endl;
+
+			return false;
+		}
+
+		sysLog.sysLog << "[GPIOHandler::setState] " <<
+			"Opening output file" << endl;
+
+		outFile.open(valueFileName);
+
+		// Check if file could be opened
+		if (!outFile.is_open()) {
+			sysLog.sysLog << "[GPIOHandler::setState] " <<
+				"ERROR: File could not be opened" << endl;
+
+			return false;
+		}
+
+		IOStreamIsOpen = true;
+	}
+
+	// Set value
+	sysLog.sysLog << "[GPIOHandler::setState] " <<
+		"Value set to " << (isOn + '0') << endl;
+
+	outFile << (isOn + '0');
+
+	return true;
+}
+
+// ---------- [Functions for the GPIOHandler class end here] ----------- //
+
+
+
 // -------- [Functions for interfacing with hardware begin here] ------- //
 
 // Ask hardware if the button is pressed
 bool buttonIsPressed() {
+	const int BUTTON_GPIO_PIN_ID = 0;
+
 	if (false) {
-		sysLog.sysLog <<
-			"[buttonIsPressed] Button is pressed" << endl;
+		sysLog.sysLog << "[buttonIsPressed] " <<
+			"Button is pressed" << endl;
 
 		return true;
 	}
@@ -224,8 +722,8 @@ bool buttonIsPressed() {
 
 // Update which lights are on/off
 void updateLightStrip(bool lightStates) {
-	sysLog.sysLog <<
-		"[updateLightStrip] Updated light strip" << endl;
+	sysLog.sysLog << "[updateLightStrip] " <<
+		"Updated light strip" << endl;
 }
 
 // --------- [Functions for interfacing with hardware end here] -------- //
@@ -441,11 +939,6 @@ bool gameLoopIdle(Statistics* stats) {
 		return false;
 	}
 
-	sysLog.sysLog <<
-		"[gameLoopIdle] Updating display" << endl;
-
-	updateDisplay(stats->highScore);
-
 	Timer* t = new Timer;
 
 	sysLog.sysLog <<
@@ -503,12 +996,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 		// Loop through levels until the level is failed
 		while (passedLevel) {
-			// Set the display
-			sysLog.sysLog <<
-				"[gameLoopPlay] Updating display" << endl;
-
-			updateDisplay(game->currentLevel);
-
 			bool levelEnded = false;
 			passedLevel = false;
 
@@ -624,16 +1111,42 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 // Set up and run the game:
 int main (const int argc, const char* const argv[]) {
+	sysLog.sysLog << "[main] " <<
+		"Program started" << endl;
+
+	// Set up GPIO pins
+	sysLog.sysLog << "[main] " <<
+		"Setting up GPIO pins" << endl;
+
+	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
+		delete systemPins[i];
+		systemPins[i] = new GPIOHandler(i);
+		systemPins[i]->activate();
+	}
+
 	Statistics* stats = new Statistics;
 	GameData* game = new GameData;
+
+	sysLog.sysLog << "[main] " <<
+		"Resetting game" << endl;
 
 	reset(game);
 
 	//Loop while the game has not been idle for MAX_IDLE_TIME
+	sysLog.sysLog << "[main] " <<
+		"Entering gameLoopIdle state" << endl;
+
 	while (gameLoopIdle(stats)) {
 		sleep(DEFAULT_PAUSE_TIME);
+
+		sysLog.sysLog << "[main] " <<
+			"Entering gameLoopPlay state" << endl;
+
 		gameLoopPlay(stats, game);
 	}
+
+	sysLog.sysLog << "[main] " <<
+		"Exiting game" << endl;
 
 	delete game;
 
