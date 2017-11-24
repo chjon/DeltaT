@@ -116,7 +116,7 @@ class Logger {
 class GPIOHandler {
 	private:
 		const char* const GPIO_EXPORT =    // Name of the file for
-			"sys/class/gpio/export";      // activating a GPIO pin
+			"sys/class/gpio/export";       // activating a GPIO pin
 		const char* GPIO_UNEXPORT =        // Name of the file for
 			"sys/class/gpio/unexport";    // deactivating a GPIO pin
 		const char* GPIO_DIRECTORY =       // Prefix for the directory for
@@ -448,7 +448,7 @@ bool GPIOHandler::activate () {
 	// Check if export file was successfully opened
 	if (!outFile.is_open()) {
 		sysLog.sysLog << "[GPIOHandler::activate] " <<
-			"ERROR: Could not open " << GPIO_EXPORT << endl;
+			"ERROR: Could not open \"" << GPIO_EXPORT << "\"" << endl;
 
 		return false;
 	}
@@ -706,9 +706,33 @@ bool GPIOHandler::setState (bool isOn) {
 
 // -------- [Functions for interfacing with hardware begin here] ------- //
 
+// Set up the GPIO pins
+bool initialize () {
+	sysLog.sysLog << "[initialize] " <<
+		"Enetered function" << endl;
+
+	// Set up GPIO pins
+	sysLog.sysLog << "[initialize] " <<
+		"Setting up GPIO pins" << endl;
+
+	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
+		delete systemPins[i];
+		systemPins[i] = new GPIOHandler(i);
+
+		if (!systemPins[i]->activate()) {
+			sysLog.sysLog << "[initialize] " <<
+				"Failed to activate pin " << (i + '0') << endl;
+
+			return false;
+		}
+	}
+
+	return true;
+}
+
 // Ask hardware if the button is pressed
 bool buttonIsPressed() {
-	const int BUTTON_GPIO_PIN_ID = 0;
+	const int BUTTON_GPIO_PIN_ID = 9;
 
 	if (false) {
 		sysLog.sysLog << "[buttonIsPressed] " <<
@@ -1114,18 +1138,16 @@ int main (const int argc, const char* const argv[]) {
 	sysLog.sysLog << "[main] " <<
 		"Program started" << endl;
 
-	// Set up GPIO pins
-	sysLog.sysLog << "[main] " <<
-		"Setting up GPIO pins" << endl;
+	if (!initialize()) {
+		sysLog.sysLog << "[main] " <<
+			"Exiting game" << endl;
 
-	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
-		delete systemPins[i];
-		systemPins[i] = new GPIOHandler(i);
-		systemPins[i]->activate();
+		return -1;
 	}
 
 	Statistics* stats = new Statistics;
 	GameData* game = new GameData;
+	game->lightStates = NULL;
 
 	sysLog.sysLog << "[main] " <<
 		"Resetting game" << endl;
