@@ -18,6 +18,13 @@ using namespace std;
 
 // ------------- [Global constant declarations begin here] ------------- //
 
+const char* const GPIO_EXPORT =                 // Name of the file for
+	"sys/class/gpio/export";                    // activating a GPIO pin
+const char* GPIO_UNEXPORT =                     // Name of the file for
+	"sys/class/gpio/unexport";                  // deactivating a GPIO pin
+const char* GPIO_DIRECTORY =                    // Prefix for the directory for
+	"sys/class/gpio/gpio";                      // controlling a GPIO pin
+
 const char STAT_FILE[] =                        // Name of the statistics file
 	"deltaT.stat";
 const char LOG_FILE[] =                         // Name of the log file
@@ -99,10 +106,6 @@ class Logger {
 				cerr << "[Logger] ERROR: Log file could not be created." << endl;
 			}
 		}
-
-		close () {
-			sysLog.close();
-		}
 };
 
 // --------------------- [Logger class ends here] ---------------------- //
@@ -117,13 +120,6 @@ class Logger {
 
 class GPIOHandler {
 	private:
-		const char* const GPIO_EXPORT =    // Name of the file for
-			"sys/class/gpio/export";       // activating a GPIO pin
-		const char* GPIO_UNEXPORT =        // Name of the file for
-			"sys/class/gpio/unexport";    // deactivating a GPIO pin
-		const char* GPIO_DIRECTORY =       // Prefix for the directory for
-			"sys/class/gpio/gpio";        // controlling a GPIO pin
-
 		char* directoryName;    // Directory for controlling a GPIO pin
 		int   pinID;            // Identifier for addressing pin
 		char* valueFileName;    // Name of the file for controlling a GPIO pin
@@ -200,6 +196,8 @@ struct Statistics {
 // ---------------- [Function declarations begin here] ----------------- //
 
 // Functions for hardware interfacing
+bool initialize();
+void deinitialize();
 bool updateLightStrip(bool* lightStates);
 int  buttonIsPressed();
 
@@ -795,6 +793,27 @@ bool updateLightStrip(bool* lightStates) {
 	return true;
 }
 
+// Clean up the GPIO pins
+void deinitialize() {
+	sysLog.sysLog << "[deinitialize] " <<
+		"Entered function" << endl;
+
+	// Clean up GPIO pins
+	sysLog.sysLog << "[deinitialize] " <<
+		"Cleaning up GPIO pins" << endl;
+
+	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
+		if (!systemPins[i]->deactivate()) {
+			sysLog.sysLog << "[deinitialize] " <<
+				"WARNING: Failed to activate deactivate pin " <<
+				PIN_IDS[i] << endl;
+		}
+
+		delete systemPins[i];
+		systemPins[i] = NULL;
+	}
+}
+
 // --------- [Functions for interfacing with hardware end here] -------- //
 
 
@@ -1252,6 +1271,8 @@ int main (const int argc, const char* const argv[]) {
 
 		gameLoopPlay(stats, game);
 	}
+
+	deinitialize();
 
 	sysLog.sysLog << "[main] " <<
 		"Exiting game" << endl;
