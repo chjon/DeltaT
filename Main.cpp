@@ -36,7 +36,7 @@ const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
                                                 // a light is on
 const float DEFAULT_PAUSE_TIME = 0.5;           // Time the game will pause for
                                                 // at the end of a level
-const float MAX_IDLE_TIME = 15;                // Time for which the game will
+const float MAX_IDLE_TIME = 15;                 // Time for which the game will
                                                 // idle before exiting
 const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights
                                                 // in the strip
@@ -46,7 +46,7 @@ const int MAX_LINE_LENGTH = 100;                // Length of a line in a file
 const int TOTAL_NUM_PINS = 10;                  // Total number of available
                                                 // pins on the SoC
 const int PIN_IDS[10] = {                       // IDs of the pins that will be
-	0, 1, 6, 45, 46, 2, 3, 11, 18, 19           // used
+	0, 1, 6, 4, 5, 2, 3, 11, 45, 46             // used
 };
 
 // -------------- [Global constant declarations end here] -------------- //
@@ -685,7 +685,7 @@ bool GPIOHandler::setState (bool isOn) {
 	sysLog.sysLog << "[GPIOHandler::setState][Pin " << pinID << "] " <<
 		"Value set to " << (isOn + 0) << endl;
 
-	outFile << (isOn + '0');
+	outFile << ((isOn) ? ("1") : ("0"));
 
 	return true;
 }
@@ -725,6 +725,18 @@ bool initialize() {
 				sysLog.sysLog << "[initialize] " <<
 					"ERROR: Could not set pin " << PIN_IDS[i] <<
 					" to output" << endl;
+
+				return false;
+			}
+
+			// Set state of pin to false
+			sysLog.sysLog << "[initialize] " <<
+				"Setting state of pin " << PIN_IDS[i] << " to false" << endl;
+
+			if (!systemPins[i]->setState(false)) {
+				sysLog.sysLog << "[initialize] " <<
+					"ERROR: Could not set pin " << PIN_IDS <<
+					" to false";
 
 				return false;
 			}
