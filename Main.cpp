@@ -18,19 +18,25 @@ using namespace std;
 
 // ------------- [Global constant declarations begin here] ------------- //
 
+const char* const GPIO_EXPORT =                 // Name of the file for
+	"sys/class/gpio/export";                    // activating a GPIO pin
+const char* GPIO_UNEXPORT =                     // Name of the file for
+	"sys/class/gpio/unexport";                  // deactivating a GPIO pin
+const char* GPIO_DIRECTORY =                    // Prefix for the directory for
+	"sys/class/gpio/gpio";                      // controlling a GPIO pin
+
 const char STAT_FILE[] =                        // Name of the statistics file
 	"deltaT.stat";
 const char LOG_FILE[] =                         // Name of the log file
 	"deltaT.log";
 
-enum gameState {IDLE, IN_PLAY, GAME_OVER};
 const float TIME_PER_LEVEL = 10;                // Time per level in seconds
 const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
 const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
                                                 // a light is on
 const float DEFAULT_PAUSE_TIME = 0.5;           // Time the game will pause for
                                                 // at the end of a level
-const float MAX_IDLE_TIME = 120;                // Time for which the game will
+const float MAX_IDLE_TIME = 15;                 // Time for which the game will
                                                 // idle before exiting
 const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights
                                                 // in the strip
@@ -39,6 +45,9 @@ const int INITIAL_NUM_LIVES = 3;                // Initial number of lives
 const int MAX_LINE_LENGTH = 100;                // Length of a line in a file
 const int TOTAL_NUM_PINS = 10;                  // Total number of available
                                                 // pins on the SoC
+const int PIN_IDS[10] = {                       // IDs of the pins that will be
+	0, 1, 6, 4, 5, 2, 3, 11, 45, 46             // used
+};
 
 // -------------- [Global constant declarations end here] -------------- //
 
@@ -97,10 +106,6 @@ class Logger {
 				cerr << "[Logger] ERROR: Log file could not be created." << endl;
 			}
 		}
-
-		close () {
-			sysLog.close();
-		}
 };
 
 // --------------------- [Logger class ends here] ---------------------- //
@@ -115,24 +120,18 @@ class Logger {
 
 class GPIOHandler {
 	private:
-		const char* const GPIO_EXPORT =    // Name of the file for
-			"sys/class/gpio/export";       // activating a GPIO pin
-		const char* GPIO_UNEXPORT =        // Name of the file for
-			"sys/class/gpio/unexport";    // deactivating a GPIO pin
-		const char* GPIO_DIRECTORY =       // Prefix for the directory for
-			"sys/class/gpio/gpio";        // controlling a GPIO pin
-
 		char* directoryName;    // Directory for controlling a GPIO pin
 		int   pinID;            // Identifier for addressing pin
-		bool  IOStreamIsOpen;   // Marker for whether the GPIO pin IO stream
-		                        // is open
+		char* valueFileName;    // Name of the file for controlling a GPIO pin
 
 		ifstream inFile;        // File for generic file reading
 		ofstream outFile;       // File for generic file writing
 
 		bool stringFromInt(int num, char*& output);
 		int  getLength(const char* string);
-		bool concatenate(const char* string1, const char* string2, char*& output);
+		bool concatenate(
+			const char* string1, const char* string2, char*& output
+		);
 
 	public:
 		GPIOHandler(int pinID);
@@ -161,7 +160,6 @@ GPIOHandler* systemPins[TOTAL_NUM_PINS];
 
 // Structure for holding data about the game
 struct GameData {
-	gameState currentState;     // This indicates the current state of the game
 	float timePerLevel;         // This is the duration in seconds for which a
 	                            // level lasts
 	float timePerLight;         // This is the duration in seconds for which a
@@ -198,8 +196,10 @@ struct Statistics {
 // ---------------- [Function declarations begin here] ----------------- //
 
 // Functions for hardware interfacing
-void updateLightStrip(bool lightStates);
-bool buttonIsPressed();
+bool initialize();
+void deinitialize();
+bool updateLightStrip(bool* lightStates);
+int  buttonIsPressed();
 
 // Functions for file input/output
 bool readStats(const char* fileName, Statistics* stats);
@@ -338,7 +338,7 @@ bool GPIOHandler::concatenate (const char* string1,
 	// Check for null pointers
 	if (string1 == NULL || string2 == NULL) {
 		sysLog.sysLog << "[GPIOHandler::concatenate] " <<
-			"Error: Received null string" << endl;
+			"ERROR: Received null string" << endl;
 
 		return false;
 	}
@@ -377,7 +377,7 @@ GPIOHandler::GPIOHandler (int pinID) {
 	sysLog.sysLog << "[GPIOHandler::GPIOHandler] " <<
 		"Entered constructor" << endl;
 
-	this->IOStreamIsOpen = false;
+	this->valueFileName = NULL;
 	char* idString;
 
 	// Handle invalid ID
@@ -399,15 +399,17 @@ GPIOHandler::GPIOHandler () {
 	sysLog.sysLog << "[GPIOHandler::GPIOHandler] " <<
 		"Entered constructor" << endl;
 
-	this->IOStreamIsOpen = false;
 	this->pinID = -1;
 	this->directoryName = NULL;
+	this->valueFileName = NULL;
 }
 
 // GPIOHandler deconstructor
 GPIOHandler::~GPIOHandler () {
 	delete directoryName;
 	directoryName = NULL;
+	delete valueFileName;
+	valueFileName = NULL;
 	pinID = -1;
 
 	if (inFile.is_open()) {
@@ -437,9 +439,9 @@ bool GPIOHandler::activate () {
 
 	if (inFile.is_open()) {
 		sysLog.sysLog << "[GPIOHandler::activate] " <<
-			"ERROR: GPIO pin has already been activated" << endl;
+			"WARNING: GPIO pin has already been activated" << endl;
 
-		return false;
+		return true;
 	}
 
 	inFile.close();
@@ -491,9 +493,9 @@ bool GPIOHandler::deactivate () {
 
 	if (!inFile.is_open()) {
 		sysLog.sysLog << "[GPIOHandler::deactivate] " <<
-			"ERROR: GPIO pin has already been deactivated" << endl;
+			"WARNING: GPIO pin has already been deactivated" << endl;
 
-		return false;
+		return true;
 	}
 
 	inFile.close();
@@ -525,7 +527,7 @@ bool GPIOHandler::deactivate () {
 	return true;
 }
 
-// Desginate GPIO pin to be either input or output
+// Designate GPIO pin to be either input or output
 bool GPIOHandler::setType (bool isInput) {
 	const char* IO_DIRECTION_FILE =
 		"/direction";
@@ -571,7 +573,8 @@ bool GPIOHandler::setType (bool isInput) {
 	}
 
 	sysLog.sysLog << "[GPIOHandler::setType] " <<
-		"GPIO pin set to " << ((isInput) ? ("input") : ("output")) << endl;
+		"Pin " << pinID << " set to " <<
+		((isInput) ? ("input") : ("output")) << endl;
 
 	outFile.close();
 
@@ -583,8 +586,8 @@ bool GPIOHandler::getState (bool& isOn) {
 	const char* IO_VALUE_FILE =
 		"/value";
 
-	sysLog.sysLog << "[GPIOHandler::getState] " <<
-		"Entered function" << endl;
+	/*sysLog.sysLog << "[GPIOHandler::getState] " <<
+		"Entered function" << endl;*/
 
 	// Check if object is valid
 	if (pinID < 0) {
@@ -594,11 +597,8 @@ bool GPIOHandler::getState (bool& isOn) {
 		return false;
 	}
 
-	// Check if IOStream is already open
-	if (!IOStreamIsOpen) {
-		// Build path name
-		char* valueFileName;
-
+	// Build path name
+	if (valueFileName == NULL) {
 		sysLog.sysLog << "[GPIOHandler::getState] " <<
 			"Building path name" << endl;
 
@@ -608,38 +608,34 @@ bool GPIOHandler::getState (bool& isOn) {
 
 			return false;
 		}
+	}
 
+	this->inFile.close();
+	this->inFile.open(valueFileName);
+
+	// Check if file could be opened
+	if (!this->inFile.is_open()) {
 		sysLog.sysLog << "[GPIOHandler::getState] " <<
-			"Opening input file" << endl;
+			"ERROR: File could not be opened" << endl;
 
-		inFile.open(valueFileName);
-
-		// Check if file could be opened
-		if (!inFile.is_open()) {
-			sysLog.sysLog << "[GPIOHandler::getState] " <<
-				"ERROR: File could not be opened" << endl;
-
-			return false;
-		}
-
-		IOStreamIsOpen = true;
+		return false;
 	}
 
 	// Read value from file
-	char* line = new char[MAX_LINE_LENGTH];
+	char pinState = 0;
 
 	// Check if value can be read
-	if (!inFile.getline(line, MAX_LINE_LENGTH)) {
+	if (!this->inFile.get(pinState)) {
 		sysLog.sysLog << "[GPIOHandler::getState] " <<
 			"ERROR: Value could not be read" << endl;
 
 		return false;
 	}
 
-	sysLog.sysLog << "[GPIOHandler::getState] " <<
-		"Read value \"" << line << "\"" << endl;
+	/*sysLog.sysLog << "[GPIOHandler::getState] " <<
+		"Read value \"" << pinState << "\"" << endl;*/
 
-	isOn = (line[0] == '1');
+	isOn = (pinState == '1');
 
 	return true;
 }
@@ -649,9 +645,6 @@ bool GPIOHandler::setState (bool isOn) {
 	const char* IO_VALUE_FILE =
 		"/value";
 
-	sysLog.sysLog << "[GPIOHandler::setState] " <<
-		"Entered function" << endl;
-
 	// Check if object is valid
 	if (pinID < 0) {
 		sysLog.sysLog << "[GPIOHandler::setState] " <<
@@ -660,42 +653,39 @@ bool GPIOHandler::setState (bool isOn) {
 		return false;
 	}
 
-	// Check if IOStream is already open
-	if (!IOStreamIsOpen) {
-		// Build path name
-		char* valueFileName;
+	/*sysLog.sysLog << "[GPIOHandler::setState][Pin " << pinID << "] " <<
+	"Entered function" << endl;*/
 
-		sysLog.sysLog << "[GPIOHandler::setState] " <<
+	// Build path name
+	if (valueFileName == NULL) {
+		sysLog.sysLog << "[GPIOHandler::setState][Pin " << pinID << "] " <<
 			"Building path name" << endl;
 
 		if (!concatenate(directoryName, IO_VALUE_FILE, valueFileName)) {
-			sysLog.sysLog << "[GPIOHandler::setState] " <<
+			sysLog.sysLog << "[GPIOHandler::setState][Pin " << pinID << "] " <<
 				"ERROR: path name could not be built" << endl;
 
 			return false;
 		}
+	}
 
-		sysLog.sysLog << "[GPIOHandler::setState] " <<
-			"Opening output file" << endl;
+	// Open output file
+	outFile.close();
+	outFile.open(valueFileName);
 
-		outFile.open(valueFileName);
+	// Check if file could be opened
+	if (!outFile.is_open()) {
+		sysLog.sysLog << "[GPIOHandler::setState][Pin " << pinID << "] " <<
+			"ERROR: File could not be opened" << endl;
 
-		// Check if file could be opened
-		if (!outFile.is_open()) {
-			sysLog.sysLog << "[GPIOHandler::setState] " <<
-				"ERROR: File could not be opened" << endl;
-
-			return false;
-		}
-
-		IOStreamIsOpen = true;
+		return false;
 	}
 
 	// Set value
-	sysLog.sysLog << "[GPIOHandler::setState] " <<
-		"Value set to " << (isOn + '0') << endl;
+	sysLog.sysLog << "[GPIOHandler::setState][Pin " << pinID << "] " <<
+		"Value set to " << (isOn + 0) << endl;
 
-	outFile << (isOn + '0');
+	outFile << ((isOn) ? ("1") : ("0"));
 
 	return true;
 }
@@ -707,9 +697,9 @@ bool GPIOHandler::setState (bool isOn) {
 // -------- [Functions for interfacing with hardware begin here] ------- //
 
 // Set up the GPIO pins
-bool initialize () {
+bool initialize() {
 	sysLog.sysLog << "[initialize] " <<
-		"Enetered function" << endl;
+		"Entered function" << endl;
 
 	// Set up GPIO pins
 	sysLog.sysLog << "[initialize] " <<
@@ -717,11 +707,96 @@ bool initialize () {
 
 	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
 		delete systemPins[i];
-		systemPins[i] = new GPIOHandler(i);
+		systemPins[i] = new GPIOHandler(PIN_IDS[i]);
 
 		if (!systemPins[i]->activate()) {
 			sysLog.sysLog << "[initialize] " <<
-				"Failed to activate pin " << (i + '0') << endl;
+				"Failed to activate pin " << PIN_IDS[i] << endl;
+
+			return false;
+		}
+
+		// Set first nine pins as output for LEDs
+		if (i < TOTAL_NUM_PINS - 1) {
+			sysLog.sysLog << "[initialize] " <<
+				"Setting pin " << PIN_IDS[i] << " to output" << endl;
+
+			if (!systemPins[i]->setType(false)) {
+				sysLog.sysLog << "[initialize] " <<
+					"ERROR: Could not set pin " << PIN_IDS[i] <<
+					" to output" << endl;
+
+				return false;
+			}
+
+			// Set state of pin to false
+			sysLog.sysLog << "[initialize] " <<
+				"Setting state of pin " << PIN_IDS[i] << " to false" << endl;
+
+			if (!systemPins[i]->setState(false)) {
+				sysLog.sysLog << "[initialize] " <<
+					"ERROR: Could not set pin " << PIN_IDS <<
+					" to false";
+
+				return false;
+			}
+
+		// Set last pin as input from button
+		} else {
+			sysLog.sysLog << "[initialize] " <<
+				"Setting pin " << PIN_IDS[i] << " to input" << endl;
+
+			if (!systemPins[i]->setType(true)) {
+				sysLog.sysLog << "[initialize] " <<
+					"ERROR: Could not set pin " << PIN_IDS[i] << " to input" << endl;
+
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+// Ask hardware if the button is pressed
+int buttonIsPressed() {
+	const int BUTTON_GPIO_PIN_ID = TOTAL_NUM_PINS - 1;
+	bool isOn = false;
+
+	/*sysLog.sysLog << "[buttonIsPressed] " <<
+		"Entered function" << endl;*/
+
+	// Error check
+	if (!systemPins[BUTTON_GPIO_PIN_ID]->getState(isOn)) {
+		sysLog.sysLog << "[buttonIsPressed] " <<
+			"ERROR: Could not get button state" << endl;
+
+		return -1;
+	}
+
+	// Check for button press
+	if (isOn) {
+		sysLog.sysLog << "[buttonIsPressed] " <<
+			"Button is pressed" << endl;
+
+		return 1;
+	}
+
+	return 0;
+}
+
+// Update which lights are on/off
+bool updateLightStrip(bool* lightStates) {
+	sysLog.sysLog << "[updateLightStrip] " <<
+		"Entered function" << endl;
+
+	// Iterate through lights
+	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+		// Check for errors in changing lights
+		if (!systemPins[i]->setState(lightStates[i])) {
+			sysLog.sysLog << "[updateLightStrip] " <<
+				"ERROR: State of light at pin " << PIN_IDS[i] <<
+				" could not be set" << endl;
 
 			return false;
 		}
@@ -730,24 +805,25 @@ bool initialize () {
 	return true;
 }
 
-// Ask hardware if the button is pressed
-bool buttonIsPressed() {
-	const int BUTTON_GPIO_PIN_ID = 9;
+// Clean up the GPIO pins
+void deinitialize() {
+	sysLog.sysLog << "[deinitialize] " <<
+		"Entered function" << endl;
 
-	if (false) {
-		sysLog.sysLog << "[buttonIsPressed] " <<
-			"Button is pressed" << endl;
+	// Clean up GPIO pins
+	sysLog.sysLog << "[deinitialize] " <<
+		"Cleaning up GPIO pins" << endl;
 
-		return true;
+	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
+		if (!systemPins[i]->deactivate()) {
+			sysLog.sysLog << "[deinitialize] " <<
+				"WARNING: Failed to activate deactivate pin " <<
+				PIN_IDS[i] << endl;
+		}
+
+		delete systemPins[i];
+		systemPins[i] = NULL;
 	}
-
-	return false;
-}
-
-// Update which lights are on/off
-void updateLightStrip(bool lightStates) {
-	sysLog.sysLog << "[updateLightStrip] " <<
-		"Updated light strip" << endl;
 }
 
 // --------- [Functions for interfacing with hardware end here] -------- //
@@ -779,7 +855,7 @@ bool readStats(const char* fileName, Statistics* stats) {
 	// Read data from file
 	bool done = false;
 	int fileLineNumber = 0;
-	char* line = new char[MAX_LINE_LENGTH];
+	char* line;
 
 	if (!inFile.getline(line, MAX_LINE_LENGTH)) {
 		// Handle end of file
@@ -848,6 +924,8 @@ bool updateLightPosition(GameData* game) {
 		return false;
 	}
 
+	game->lightStates[game->currentLightPosition] = false;
+
 	// Move current light to the right
 	if (game->isMovingRight) {
 		game->currentLightPosition += 1;
@@ -864,6 +942,8 @@ bool updateLightPosition(GameData* game) {
 		sysLog.sysLog <<
 			"[updateLightPosition] Light moved to the left" << endl;
 	}
+
+	game->lightStates[game->currentLightPosition] = true;
 
 	// Reset light timer
 	game->lightTimer->setStopTime(game->timePerLight);
@@ -900,7 +980,6 @@ bool reset(GameData* game) {
 		return false;
 	}
 
-	game->currentState = IDLE;
 	game->timePerLevel = TIME_PER_LEVEL;
 	game->timePerLight = INITIAL_TIME_PER_LIGHT;
 	game->levelTimer   = new Timer;
@@ -910,20 +989,20 @@ bool reset(GameData* game) {
 
 	// Initialize array if it does not already exist
 	if (game->lightStates == NULL) {
-		game->lightStates[TOTAL_NUM_LIGHTS];
+		game->lightStates = new bool[TOTAL_NUM_LIGHTS];
 
 		sysLog.sysLog <<
 			"[reset] Initialized lightStates array" << endl;
-
-	// Clear array if it already exists
-	} else {
-		for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
-			game->lightStates[i] = false;
-		}
-
-		sysLog.sysLog <<
-			"[reset] Cleared lightStates array" << endl;
 	}
+
+	// Clear array
+	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+		game->lightStates[i] = false;
+	}
+
+	sysLog.sysLog <<
+		"[reset] Cleared lightStates array" << endl;
+
 
 	return true;
 }
@@ -970,7 +1049,29 @@ bool gameLoopIdle(Statistics* stats) {
 
 	t->setStopTime(MAX_IDLE_TIME);
 
-	while (!buttonIsPressed() && !t->isFinished());
+	// Get button press
+	int buttonPress = buttonIsPressed();
+
+	// Validate button press
+	if (buttonPress == -1) {
+		sysLog.sysLog << "[gameLoopIdle] " <<
+			"ERROR: Button state could not be detected" << endl;
+
+		return false;
+	}
+
+	while (buttonPress != 1 && !t->isFinished()) {
+		// Get button press
+		buttonPress = buttonIsPressed();
+
+		// Check if button press was not detected
+		if (buttonPress == -1) {
+			sysLog.sysLog << "[gameLoopIdle] " <<
+				"ERROR: Button state could not be detected" << endl;
+
+			return false;
+		}
+	};
 
 	if (!t->isFinished()) {
 		delete t;
@@ -1043,10 +1144,26 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 					game->lightTimer->setStopTime(game->timePerLight);
 					updateLightPosition(game);
+
+					// Handle errors in updating light strip
+					if (!updateLightStrip(game->lightStates)) {
+						sysLog.sysLog << "[gameLoopPlay] " <<
+							"ERROR: Light could not be set" << endl;
+					}
 				}
 
 				// Check for button press
-				if (buttonIsPressed()) {
+				int buttonPress = buttonIsPressed();
+
+				// Validate button press
+				if (buttonPress == -1) {
+					sysLog.sysLog << "[gameLoopPlay] " <<
+					"ERROR: Button state could not be detected" << endl;
+
+					return false;
+
+				// Handle button press
+				} else if (buttonPress == 1) {
 					sysLog.sysLog <<
 						"[gameLoopPlay] Button press detected" << endl;
 
@@ -1166,6 +1283,8 @@ int main (const int argc, const char* const argv[]) {
 
 		gameLoopPlay(stats, game);
 	}
+
+	deinitialize();
 
 	sysLog.sysLog << "[main] " <<
 		"Exiting game" << endl;
