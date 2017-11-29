@@ -187,6 +187,8 @@ struct Statistics {
 	                            // has been played
 	int timesPressed;           // This is the total number of times the button
 	                            // has been pressed
+	int totalLivesLost;      		//This is the total number of lives lost and total
+															// times the button was misclicked
 };
 
 // ------------------ [Structure definitions end here] ----------------- //
@@ -875,7 +877,41 @@ bool readStats(const char* fileName, Statistics* stats) {
 	return true;
 }
 
-bool writeStats(const char* fileName, Statistics* stats) {}
+bool writeStats(const char* fileName, Statistics* stats) {
+
+	//call parseLine function (see parseline document)
+	//call function to update highscore
+	//check if current level is higher,
+	// if higher, update
+	//call function to total time played (ever)
+	//number of times button was clicked
+	//number of lives lost
+
+	ofstream outFile;
+	outFile.open(fileName, ios::out); 		// trying to open a writing file
+
+	if(!outFile.is_open()) {				//checking if file could be opened
+		cout << “Error in opening output file” << endl;
+		return false;
+	}
+
+	fileName << highScore << endl;		//writing in file
+	fileName << totalTimePlayed << endl;
+	fileName << timesPressed << endl;
+	fileName << totalLivesLost << endl;
+
+	outFile.close(); 				// closing file
+	return 0;
+}
+
+void highScoreFunc(int*& highScore, int currentLevel){
+	if(currentLevel > highScore)
+		highScore = currentLevel;
+}
+
+void playTime(float* &totalTimePlayed){
+	totalTimePlayed += clock();
+}
 
 // ------------ [Functions for file input/output end here] ------------- //
 
