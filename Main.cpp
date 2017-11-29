@@ -206,6 +206,8 @@ int  buttonIsPressed();
 // Functions for file input/output
 bool readStats(const char* fileName, Statistics* stats);
 bool writeStats(const char* fileName, Statistics* stats);
+void highScoreFunc(int*& highScore, int currentLevel);
+void playTime(float*& totalTimePlayed);
 
 // Functions for changing game data
 bool updateLightPosition(GameData* game);
@@ -877,24 +879,33 @@ bool readStats(const char* fileName, Statistics* stats) {
 	return true;
 }
 
-bool writeStats(const char* fileName, Statistics* stats) {
+//Update high score
+void highScoreFunc(int*& highScore, int currentLevel){
+	if(currentLevel > highScore)
+		highScore = currentLevel;
+}
 
-	//call parseLine function (see parseline document)
-	//call function to update highscore
-	//check if current level is higher,
-	// if higher, update
-	//call function to total time played (ever)
-	//number of times button was clicked
-	//number of lives lost
+//Update total time played
+void playTime(float*& totalTimePlayed){
+	totalTimePlayed += clock();
+}
+
+bool writeStats(const char* fileName, Statistics* stats) {
+	//updates highscore
+	//updates total time played
+	//updates number of times button was clicked
+	//updates number of lives lost
 
 	ofstream outFile;
-	outFile.open(fileName, ios::out); 		// trying to open a writing file
+	outFile.open(outFile, ios::out); 		// trying to open a writing file
 
 	if(!outFile.is_open()) {				//checking if file could be opened
 		cout << “Error in opening output file” << endl;
 		return false;
 	}
 
+	highScoreFunc (highScore, currentLevel);
+	playTime(totalTimePlayed);
 	fileName << highScore << endl;		//writing in file
 	fileName << totalTimePlayed << endl;
 	fileName << timesPressed << endl;
@@ -902,15 +913,6 @@ bool writeStats(const char* fileName, Statistics* stats) {
 
 	outFile.close(); 				// closing file
 	return 0;
-}
-
-void highScoreFunc(int*& highScore, int currentLevel){
-	if(currentLevel > highScore)
-		highScore = currentLevel;
-}
-
-void playTime(float* &totalTimePlayed){
-	totalTimePlayed += clock();
 }
 
 // ------------ [Functions for file input/output end here] ------------- //
