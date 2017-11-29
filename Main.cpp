@@ -30,9 +30,9 @@ const char STAT_FILE[] =                        // Name of the statistics file
 const char LOG_FILE[] =                         // Name of the log file
 	"deltaT.log";
 
-const float TIME_PER_LEVEL = 10;                // Time per level in seconds
-const float INITIAL_TIME_PER_LIGHT = 0.5;       // Time per light in seconds
-const float SCALING_TIME_PER_LIGHT = 0.99;      // Multiplier for the duration
+const float TIME_PER_LEVEL = 60;                // Time per level in seconds
+const float INITIAL_TIME_PER_LIGHT = 0.4;       // Time per light in seconds
+const float SCALING_TIME_PER_LIGHT = 0.50;      // Multiplier for the duration
                                                 // a light is on
 const float DEFAULT_PAUSE_TIME = 0.5;           // Time the game will pause for
                                                 // at the end of a level
@@ -40,13 +40,13 @@ const float MAX_IDLE_TIME = 15;                 // Time for which the game will
                                                 // idle before exiting
 const int TOTAL_NUM_LIGHTS = 9;                 // The total number of lights
                                                 // in the strip
-const int TARGET_INDEX = TOTAL_NUM_LIGHTS / 2;  // Index of the target light
+const int TARGET_INDEX = 4;                     // Index of the target light
 const int INITIAL_NUM_LIVES = 3;                // Initial number of lives
 const int MAX_LINE_LENGTH = 100;                // Length of a line in a file
 const int TOTAL_NUM_PINS = 10;                  // Total number of available
                                                 // pins on the SoC
 const int PIN_IDS[10] = {                       // IDs of the pins that will be
-	0, 1, 6, 4, 5, 2, 3, 11, 45, 46             // used
+	0, 18, 6, 4, 5, 2, 3, 11, 45, 1             // used
 };
 
 // -------------- [Global constant declarations end here] -------------- //
@@ -815,6 +815,16 @@ void deinitialize() {
 		"Cleaning up GPIO pins" << endl;
 
 	for (int i = 0; i < TOTAL_NUM_PINS; i++) {
+		// Turn off lights
+		if (i < TOTAL_NUM_LIGHTS) {
+			if (!systemPins[i]->setState(false)) {
+				sysLog.sysLog << "[deinitialize] " <<
+					"WARNING: Failed to turn off light" <<
+					PIN_IDS[i] << endl;
+			}
+		}
+
+		// Deactivate pin
 		if (!systemPins[i]->deactivate()) {
 			sysLog.sysLog << "[deinitialize] " <<
 				"WARNING: Failed to activate deactivate pin " <<
@@ -924,8 +934,6 @@ bool updateLightPosition(GameData* game) {
 		return false;
 	}
 
-	game->lightStates[game->currentLightPosition] = false;
-
 	// Move current light to the right
 	if (game->isMovingRight) {
 		game->currentLightPosition += 1;
@@ -943,7 +951,10 @@ bool updateLightPosition(GameData* game) {
 			"[updateLightPosition] Light moved to the left" << endl;
 	}
 
-	game->lightStates[game->currentLightPosition] = true;
+	// Update lightStates array
+	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+		game->lightStates[i] = (i == game->currentLightPosition);
+	}
 
 	// Reset light timer
 	game->lightTimer->setStopTime(game->timePerLight);
@@ -998,11 +1009,56 @@ bool reset(GameData* game) {
 	// Clear array
 	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
 		game->lightStates[i] = false;
+
+		// Turn off lights
+		if (!systemPins[i]->setState(false)) {
+			return false;
+		}
 	}
 
 	sysLog.sysLog <<
 		"[reset] Cleared lightStates array" << endl;
 
+	return true;
+}
+
+// Flash lights
+bool flashLights () {
+	bool * lightStates = new bool[TOTAL_NUM_LIGHTS];
+
+	// Wait DEFAULT_PAUSE_TIME seconds
+	sysLog.sysLog << "[flashLights] " <<
+	"Flashing lights" << endl;
+
+	// Set all lights to on
+	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+		lightStates[i] = true;
+	}
+
+	if (!updateLightStrip(lightStates)) {
+		sysLog.sysLog << "[flashLights] " <<
+			"ERROR: Could not turn on light(s)" << endl;
+
+		return false;
+	}
+
+	Timer* t = new Timer;
+
+	t->setStopTime(DEFAULT_PAUSE_TIME);
+
+	while (!t->isFinished());
+
+	// Set all lights to off
+	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+		lightStates[i] = false;
+	}
+
+	if (!updateLightStrip(lightStates)) {
+		sysLog.sysLog << "[flashLights] " <<
+			"ERROR: Could not turn off light(s)" << endl;
+
+		return false;
+	}
 
 	return true;
 }
@@ -1030,7 +1086,7 @@ void sleep (float seconds) {
 }
 
 // Do nothing until the button is pressed
-bool gameLoopIdle(Statistics* stats) {
+bool gameLoopIdle(Statistics* stats, GameData* game) {
 	sysLog.sysLog <<
 		"[gameLoopIdle] Entered gameLoopIdle state" << endl;
 
@@ -1076,8 +1132,8 @@ bool gameLoopIdle(Statistics* stats) {
 	if (!t->isFinished()) {
 		delete t;
 
-		sysLog.sysLog <<
-			"[gameLoopIdle] Button press detected - exiting idle state" << endl;
+		sysLog.sysLog << "[gameLoopIdle] " <<
+			"Button press detected - exiting idle state" << endl;
 
 		return true;
 	} else {
@@ -1105,11 +1161,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 	}
 
 	sysLog.sysLog <<
-		"[gameLoopPlay] Resetting game" << endl;
-
-	reset(game);
-
-	sysLog.sysLog <<
 		"[gameLoopPlay] Entering life loop" << endl;
 
 	// Loop until there are no lives remaining
@@ -1123,6 +1174,23 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 		while (passedLevel) {
 			bool levelEnded = false;
 			passedLevel = false;
+
+			sysLog.sysLog << "[gameLoopPlay] " <<
+				"Reset game" << endl;
+
+			reset(game);
+
+			sysLog.sysLog <<
+				"[gameLoopPlay] Set random direction" << endl;
+			setRandomDirection(game);
+
+			// Handle errors in updating light strip
+			if (!updateLightStrip(game->lightStates)) {
+				sysLog.sysLog << "[gameLoopPlay] " <<
+					"ERROR: Light could not be set" << endl;
+
+				return false;
+			}
 
 			// Set initial timer values
 			sysLog.sysLog <<
@@ -1139,17 +1207,22 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 				// Update lights if it is time to update the lights
 				if (game->lightTimer->isFinished()) {
-					sysLog.sysLog <<
-						"[gameLoopPlay] Updating light position" << endl;
+					sysLog.sysLog << game->currentLightPosition << endl;
 
-					game->lightTimer->setStopTime(game->timePerLight);
 					updateLightPosition(game);
 
 					// Handle errors in updating light strip
 					if (!updateLightStrip(game->lightStates)) {
 						sysLog.sysLog << "[gameLoopPlay] " <<
-							"ERROR: Light could not be set" << endl;
+						"ERROR: Light could not be set" << endl;
+
+						return false;
 					}
+
+					sysLog.sysLog <<
+						"[gameLoopPlay] Updating light position" << endl;
+
+					game->lightTimer->setStopTime(game->timePerLight);
 				}
 
 				// Check for button press
@@ -1169,11 +1242,17 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 					// Signify that the game has failed if the
 					// incorrect light is on
-					if (game->currentLightPosition != TARGET_INDEX) {
+					if ((game->isMovingRight && game->currentLightPosition != TARGET_INDEX + 1) ||
+							(!game->isMovingRight && game->currentLightPosition != TARGET_INDEX - 1)) {
+
 						sysLog.sysLog <<
-							"[gameLoopPlay] Incorrect position detected" << endl;
+							"[gameLoopPlay] Incorrect position detected: " <<
+							game->currentLightPosition << ", expecting " <<
+							TARGET_INDEX << endl;
 
 						passedLevel = false;
+					} else {
+						passedLevel = true;
 					}
 
 					levelEnded = true;
@@ -1198,6 +1277,12 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 			//Check if passedLevel
 			if (passedLevel) {
+				// Flash lights
+				sysLog.sysLog << "[gameLoopPlay] " <<
+					"Flash lights to indicate success" << endl;
+
+				flashLights();
+
 				sysLog.sysLog <<
 					"[gameLoopPlay] Level passed" << endl;
 
@@ -1221,10 +1306,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 						stats->highScore << endl;
 				}
 			}
-
-			sysLog.sysLog <<
-				"[gameLoopPlay] Set random direction" << endl;
-			setRandomDirection(game);
 		}
 
 		sysLog.sysLog <<
@@ -1275,7 +1356,7 @@ int main (const int argc, const char* const argv[]) {
 	sysLog.sysLog << "[main] " <<
 		"Entering gameLoopIdle state" << endl;
 
-	while (gameLoopIdle(stats)) {
+	while (gameLoopIdle(stats, game)) {
 		sleep(DEFAULT_PAUSE_TIME);
 
 		sysLog.sysLog << "[main] " <<
