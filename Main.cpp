@@ -1207,8 +1207,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 				// Update lights if it is time to update the lights
 				if (game->lightTimer->isFinished()) {
-					sysLog.sysLog << game->currentLightPosition << endl;
-
 					updateLightPosition(game);
 
 					// Handle errors in updating light strip
@@ -1281,7 +1279,12 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 				sysLog.sysLog << "[gameLoopPlay] " <<
 					"Flash lights to indicate success" << endl;
 
-				flashLights();
+				if (!flashLights()) {
+					sysLog.sysLog << "[gameLoopPlay] " <<
+						"ERROR: Lights could not be flashed" << endl;
+
+					return false;
+				}
 
 				sysLog.sysLog <<
 					"[gameLoopPlay] Level passed" << endl;
