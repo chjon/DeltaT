@@ -187,6 +187,8 @@ struct Statistics {
 	                            // has been played
 	int timesPressed;           // This is the total number of times the button
 	                            // has been pressed
+	int totalLivesLost;         // This is the total number of times the button
+	                            // was pressed incorrectly
 };
 
 // ------------------ [Structure definitions end here] ----------------- //
@@ -204,6 +206,10 @@ int  buttonIsPressed();
 // Functions for file input/output
 bool readStats(const char* fileName, Statistics* stats);
 bool writeStats(const char* fileName, Statistics* stats);
+
+// Functions for calculating stats
+bool highScoreFunc(Statistics* stats, GameData* game);
+bool playTime(Statistics* stats);
 
 // Functions for changing game data
 bool updateLightPosition(GameData* game);
@@ -885,9 +891,89 @@ bool readStats(const char* fileName, Statistics* stats) {
 	return true;
 }
 
-bool writeStats(const char* fileName, Statistics* stats) {}
+/*
+	Writes the following statistics:
+	highscore
+	total time played
+	number of times button was clicked
+	number of lives lost
+*/
+
+bool writeStats(const char* fileName, Statistics* stats) {
+	sysLog.sysLog << "[writeStats] " <<
+		"Entered function" << endl;
+
+	ofstream outFile;
+	outFile.open(fileName);
+
+	// Check if file could be opened
+	if(!outFile.is_open()) {
+		sysLog.sysLog << "[writeStats] " <<
+			"Output file could not be opened" << endl;
+
+		return false;
+	}
+
+	// Writing to file
+	outFile << stats->highScore << endl;
+	outFile << stats->totalTimePlayed << endl;
+	outFile << stats->timesPressed << endl;
+	outFile << stats->totalLivesLost << endl;
+
+	// Closing file
+	outFile.close();
+
+	sysLog.sysLog << "[writeStats] " <<
+		"Successfully wrote statistics to file" << endl;
+
+	return true;
+}
 
 // ------------ [Functions for file input/output end here] ------------- //
+
+
+
+// --------- [Functions for calculating statistics begin here] --------- //
+
+// Update high score
+bool highScoreFunc(Statistics* stats, GameData* game) {
+	// Check for null pointers
+	if (game == NULL || stats == NULL) {
+		sysLog.sysLog << "[highScoreFunc] " <<
+			"ERROR: Received null pointer" << endl;
+
+		return false;
+	}
+
+	// Update high score
+	if (game->currentLevel > stats->highScore) {
+		sysLog.sysLog << "[highScoreFunc] " <<
+			"Updating highscore from " << stats->highScore <<
+			" to " << game->currentLevel << endl;
+
+		stats->highScore = game->currentLevel;
+	}
+}
+
+// Update total time played
+bool playTime(Statistics* stats) {
+	// Check for null pointer
+	if (stats == NULL) {
+		sysLog.sysLog << "[playTime] " <<
+			"ERROR: Received null pointer" << endl;
+
+		return false;
+	}
+
+	sysLog.sysLog << "[playTime] " <<
+		"Incrementing total play time by " << clock() << endl;
+
+	stats->totalTimePlayed += clock();
+
+	return true;
+}
+
+// ---------- [Functions for calculating statistics end here] ---------- //
 
 
 
@@ -1052,6 +1138,8 @@ bool flashLights () {
 	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
 		lightStates[i] = false;
 	}
+
+	delete t;
 
 	if (!updateLightStrip(lightStates)) {
 		sysLog.sysLog << "[flashLights] " <<
@@ -1304,9 +1392,13 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 				if (game->currentLevel > stats->highScore) {
 					stats->highScore = game->currentLevel;
 
-					sysLog.sysLog <<
-						"[gameLoopPlay] Updated high score to " <<
-						stats->highScore << endl;
+					// Check for errors
+					if (!highScoreFunc(stats, game)) {
+						sysLog.sysLog << "[gameLoopPlay] " <<
+							"ERROR: High score could not be updated" << endl;
+
+						return false;
+					}
 				}
 			}
 		}
@@ -1368,6 +1460,13 @@ int main (const int argc, const char* const argv[]) {
 		gameLoopPlay(stats, game);
 	}
 
+	// Calculate total play time
+	playTime(stats);
+
+	// Write statistics to file
+
+
+	// Exit game
 	deinitialize();
 
 	sysLog.sysLog << "[main] " <<
