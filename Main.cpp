@@ -1067,6 +1067,31 @@ bool updateLightDuration(GameData* game) {
 	return true;
 }
 
+bool clearLights (GameData* game) {
+	// Initialize array if it does not already exist
+	if (game->lightStates == NULL) {
+		game->lightStates = new bool[TOTAL_NUM_LIGHTS];
+
+		sysLog.sysLog <<
+			"[clearLights] Initialized lightStates array" << endl;
+	}
+
+	// Clear array
+	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
+		game->lightStates[i] = false;
+
+		// Turn off lights
+		if (!systemPins[i]->setState(false)) {
+			return false;
+		}
+	}
+
+	sysLog.sysLog <<
+		"[clearLights] Cleared lightStates array" << endl;
+
+	return true;
+}
+
 // Reset the game
 bool reset(GameData* game) {
 	// Check for null pointer
@@ -1084,26 +1109,28 @@ bool reset(GameData* game) {
 	game->currentLevel = 0;
 	game->numLivesRemaining = INITIAL_NUM_LIVES;
 
-	// Initialize array if it does not already exist
-	if (game->lightStates == NULL) {
-		game->lightStates = new bool[TOTAL_NUM_LIGHTS];
+	// Clear light array
 
-		sysLog.sysLog <<
-			"[reset] Initialized lightStates array" << endl;
+	sysLog.sysLog << "[reset] " <<
+		"Clearing light array" << endl;
+
+	if (!clearLights(game)) {
+		sysLog.sysLog << "[reset] " <<
+			"ERROR: Light array could not be cleared" << endl;
+
+		return false;
 	}
 
-	// Clear array
-	for (int i = 0; i < TOTAL_NUM_LIGHTS; i++) {
-		game->lightStates[i] = false;
+	// Update light strip
+	sysLog.sysLog << "[reset] " <<
+		"Update light strip" << endl;
 
-		// Turn off lights
-		if (!systemPins[i]->setState(false)) {
-			return false;
-		}
+	if (!updateLightStrip(game->lightStates)) {
+		sysLog.sysLog << "[reset] " <<
+			"ERROR: Light strip could not be updated" << endl;
+
+		return false;
 	}
-
-	sysLog.sysLog <<
-		"[reset] Cleared lightStates array" << endl;
 
 	return true;
 }
@@ -1263,10 +1290,16 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 			bool levelEnded = false;
 			passedLevel = false;
 
+			// Clear lights array
 			sysLog.sysLog << "[gameLoopPlay] " <<
-				"Reset game" << endl;
+				"Clear lights array" << endl;
 
-			reset(game);
+			if (!clearLights(game)) {
+				sysLog.sysLog << "[gameLoopPlay] " <<
+					"ERROR: Could not clear lights array" << endl;
+
+				return false;
+			}
 
 			sysLog.sysLog <<
 				"[gameLoopPlay] Set random direction" << endl;
@@ -1407,10 +1440,22 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 			"[gameLoopPlay] Exiting passedLevel loop" << endl;
 
 		// Decrement number of lives
-		game->numLivesRemaining--;
+		game->numLivesRemaining -= 1;
+
 		sysLog.sysLog <<
 			"[gameLoopPlay] Number of lives set to " <<
 			game->numLivesRemaining << endl;
+	}
+
+	// Reset game
+	sysLog.sysLog << "[gameLoopPlay] " <<
+		"Resetting game" << endl;
+
+	if (!reset(game)) {
+		sysLog.sysLog << "[gameLoopPlay] " <<
+			"ERROR: Game could not be reset" << endl;
+
+		return false;
 	}
 
 	sysLog.sysLog <<
@@ -1445,7 +1490,12 @@ int main (const int argc, const char* const argv[]) {
 	sysLog.sysLog << "[main] " <<
 		"Resetting game" << endl;
 
-	reset(game);
+	if (!reset(game)) {
+		sysLog.sysLog << "[main] " <<
+			"ERROR: Could not reset game" << endl;
+
+		return -1;
+	}
 
 	//Loop while the game has not been idle for MAX_IDLE_TIME
 	sysLog.sysLog << "[main] " <<
@@ -1458,6 +1508,7 @@ int main (const int argc, const char* const argv[]) {
 			"Entering gameLoopPlay state" << endl;
 
 		gameLoopPlay(stats, game);
+		sleep(DEFAULT_PAUSE_TIME);
 	}
 
 	// Calculate total play time
