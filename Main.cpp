@@ -206,6 +206,7 @@ int  buttonIsPressed();
 // Functions for file input/output
 bool readStats(const char* fileName, Statistics* stats);
 bool writeStats(const char* fileName, Statistics* stats);
+void parseline(char line[], Statistics* stats, int tracker);
 
 // Functions for calculating stats
 bool highScoreFunc(Statistics* stats, GameData* game);
@@ -703,9 +704,17 @@ bool GPIOHandler::setState (bool isOn) {
 // -------- [Functions for interfacing with hardware begin here] ------- //
 
 // Set up the GPIO pins
-bool initialize() {
+bool initialize(Statistics* stats, GameData* game) {
 	sysLog.sysLog << "[initialize] " <<
 		"Entered function" << endl;
+
+	// Check for null pointers
+	if (stats == NULL || game == NULL) {
+		sysLog.sysLog << "[initialize] " <<
+			"ERROR: Received null pointer" << endl;
+
+		return false;
+	}
 
 	// Set up GPIO pins
 	sysLog.sysLog << "[initialize] " <<
@@ -760,6 +769,22 @@ bool initialize() {
 			}
 		}
 	}
+
+	// Initialize stats
+	stats->highScore       = 0;
+	stats->totalTimePlayed = 0;
+	stats->timesPressed    = 0;
+	stats->totalLivesLost  = 0;
+
+	// Initialize game
+	game->timePerLevel      = TIME_PER_LEVEL;
+	game->timePerLight      = INITIAL_TIME_PER_LIGHT;
+	game->levelTimer        = NULL;
+	game->lightTimer        = NULL;
+	game->currentLevel      = 0;
+	game->numLivesRemaining = INITIAL_NUM_LIVES;
+	game->lightStates       = NULL;
+	game->isMovingRight     = false;
 
 	return true;
 }
@@ -848,8 +873,66 @@ void deinitialize() {
 
 // ----------- [Functions for file input/output begin here] ------------ //
 
+// Reads a line in the file
+void parseline (char line[], Statistics* stats, int tracker) {
+	int  in = 0;
+	enum States {HIGHSCORE, PLAYTIME, TIMESPRESSED, LIVESLOST};
+	States state = HIGHSCORE;
+
+	sysLog.sysLog << "[parseline] " <<
+		"Entered function" << endl;
+
+	if (tracker == 0) {
+		state = HIGHSCORE;
+	} else if (tracker == 1) {
+		state = PLAYTIME;
+	} else if (tracker == 2) {
+		state = TIMESPRESSED;
+	} else if (tracker == 3) {
+		state = LIVESLOST;
+	}
+
+	switch (state) {
+		case HIGHSCORE:
+			sysLog.sysLog << "[parseline] " <<
+				"Setting high score to " << atoi(line) << endl;
+
+			stats->highScore = atoi(line);
+
+			break;
+
+		case PLAYTIME:
+			sysLog.sysLog << "[parseline] " <<
+				"Setting total time played to " << atof(line) << endl;
+
+			stats->totalTimePlayed = atof(line);
+
+			break;
+
+		case TIMESPRESSED:
+			sysLog.sysLog << "[parseline] " <<
+				"Setting number of times played to " << atoi(line) << endl;
+
+			stats->timesPressed = atoi(line);
+
+			break;
+
+		case LIVESLOST:
+			sysLog.sysLog << "[parseline] " <<
+				"Setting number of times lost to " << atoi(line) << endl;
+
+			stats->totalLivesLost = atoi(line);
+
+			break;
+	}
+}
+
 // Read statistics from file
-bool readStats(const char* fileName, Statistics* stats) {
+bool readStats(Statistics* stats) {
+	const char* fileName = STAT_FILE;
+
+	sysLog.sysLog << "[readStats] " <<
+		"Entered function" << endl;
 
 	// Check for null pointers
 	if (fileName == NULL || stats == NULL) {
@@ -872,21 +955,17 @@ bool readStats(const char* fileName, Statistics* stats) {
 	bool done = false;
 	int fileLineNumber = 0;
 	char* line;
+	int counter = 0;
 
-	if (!inFile.getline(line, MAX_LINE_LENGTH)) {
-		// Handle end of file
-		if (inFile.eof()) {
-			sysLog.sysLog <<
-				"[readStats] Reached end of file" << endl;
-			done = true;
-
-		// Handle error in file
-		} else {
-			sysLog.sysLog <<
-				"[readStats] ERROR: Error in file" << endl;
-			return -1;
-		}
+	// Parse each line
+	while (counter < 4) {
+		inFile.getline(line, MAX_LINE_LENGTH);
+		parseline(line, stats, counter);
+		counter++;
 	}
+
+	sysLog.sysLog << "[readStats] " <<
+		"Successfully read statistics from file" << endl;
 
 	return true;
 }
@@ -899,7 +978,9 @@ bool readStats(const char* fileName, Statistics* stats) {
 	number of lives lost
 */
 
-bool writeStats(const char* fileName, Statistics* stats) {
+bool writeStats(Statistics* stats) {
+	const char* fileName = STAT_FILE;
+
 	sysLog.sysLog << "[writeStats] " <<
 		"Entered function" << endl;
 
@@ -953,6 +1034,8 @@ bool highScoreFunc(Statistics* stats, GameData* game) {
 
 		stats->highScore = game->currentLevel;
 	}
+
+	return true;
 }
 
 // Update total time played
@@ -1359,6 +1442,8 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 					sysLog.sysLog <<
 						"[gameLoopPlay] Button press detected" << endl;
 
+					stats->timesPressed++;
+
 					// Signify that the game has failed if the
 					// incorrect light is on
 					if ((game->isMovingRight && game->currentLightPosition != TARGET_INDEX + 1) ||
@@ -1370,6 +1455,7 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 							TARGET_INDEX << endl;
 
 						passedLevel = false;
+						stats->totalLivesLost++;
 					} else {
 						passedLevel = true;
 					}
@@ -1381,6 +1467,7 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 				if (game->levelTimer->isFinished()) {
 					levelEnded = true;
 					passedLevel = false;
+					stats->totalLivesLost++;
 				}
 			}
 
@@ -1423,7 +1510,6 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 
 				// Update high score
 				if (game->currentLevel > stats->highScore) {
-					stats->highScore = game->currentLevel;
 
 					// Check for errors
 					if (!highScoreFunc(stats, game)) {
@@ -1476,16 +1562,20 @@ int main (const int argc, const char* const argv[]) {
 	sysLog.sysLog << "[main] " <<
 		"Program started" << endl;
 
-	if (!initialize()) {
+	Statistics* stats = new Statistics;
+	GameData* game = new GameData;
+
+	if (!initialize(stats, game)) {
 		sysLog.sysLog << "[main] " <<
-			"Exiting game" << endl;
+			"ERROR: Could not initialize game - exiting game" << endl;
 
 		return -1;
 	}
 
-	Statistics* stats = new Statistics;
-	GameData* game = new GameData;
-	game->lightStates = NULL;
+	if (!readStats(stats)) {
+		sysLog.sysLog << "[main] " <<
+			"Warning: Could not read statistics from file" << endl;
+	}
 
 	sysLog.sysLog << "[main] " <<
 		"Resetting game" << endl;
@@ -1515,15 +1605,13 @@ int main (const int argc, const char* const argv[]) {
 	playTime(stats);
 
 	// Write statistics to file
-
+	writeStats(stats);
 
 	// Exit game
 	deinitialize();
 
 	sysLog.sysLog << "[main] " <<
 		"Exiting game" << endl;
-
-	delete game;
 
 	return 0;
 }
