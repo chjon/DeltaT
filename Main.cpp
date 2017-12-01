@@ -206,6 +206,7 @@ int  buttonIsPressed();
 // Functions for file input/output
 bool readStats(const char* fileName, Statistics* stats);
 bool writeStats(const char* fileName, Statistics* stats);
+void parseline(char line[ ], Statistics* stats, int tracker);
 
 // Functions for calculating stats
 bool highScoreFunc(Statistics* stats, GameData* game);
@@ -848,6 +849,69 @@ void deinitialize() {
 
 // ----------- [Functions for file input/output begin here] ------------ //
 
+//Reads a line in the file
+void parseline(char line[], Statistics* stats, int tracker){
+	int in = 0;
+	enum STATES {HIGHSCORE, PLAYTIME, TIMESPRESSED, LIVESLOST};
+
+  if (tracker == 0){
+    STATES state = HIGHSCORE;
+	}
+	if (tracker == 1){
+    STATES state = PLAYTIME;
+	}
+	if (tracker == 2){
+    STATES state = TIMESPRESSED;
+	}
+	if (tracker == 3){
+    STATES state = LIVESLOST;
+	}
+
+  stats -> highScore = 0;
+  stats -> totalTimePlayed = 0;
+  stats -> timesPressed = 0;
+  stats -> totalLivesLost = 0;
+
+  while(line[in] != 0){
+		if(line[in] != ‘\n’){
+	     switch(state){
+         case HIGHSCORE:
+            while (line[in] >= ‘0’ && line[in] <= ‘9’){
+              stats -> highScore *= 10;
+              stats -> highScore += line[in] - ‘0’;
+	            in++;
+            }
+            break;
+
+		     case PLAYTIME:
+            while (line[in] >= ‘0’ && line[in] <= ‘9’){
+	             stats -> totalTimePlayed *= 10;
+	             stats -> totalTimePlayed += line[in] - ‘0’;
+	             in++;
+			      }
+			      break;
+
+		     case TIMESPRESSED:
+			      while (line[in] >= ‘0’ && line[in] <= ‘9’){
+	             stats -> timesPressed *= 10;
+	             stats -> timesPressed += line[in] - ‘0’;
+               in++;
+            }
+			      break;
+
+         case LIVESLOST:
+	          while (line[in] >= ‘0’ && line[in] <= ‘9’){
+	             stats -> totalLivesLost *= 10;
+	             stats -> totalLivesLost += line[in] - ‘0’;
+	             in++;
+			      }
+			      break;
+	     } //end of switch
+		} //end of if statement
+  } //end of while loop
+} //end of parseline function
+
+
 // Read statistics from file
 bool readStats(const char* fileName, Statistics* stats) {
 
@@ -886,7 +950,21 @@ bool readStats(const char* fileName, Statistics* stats) {
 				"[readStats] ERROR: Error in file" << endl;
 			return -1;
 		}
+
+
 	}
+//added on November 30, 2017
+	int counter = 0;
+	string row;
+	char line[1000];
+
+	while(counter < 4){
+		getline(line, 1000);
+		parseline(line, stats, counter);
+		counter ++;
+	}
+
+	inFile.close(); // closing file
 
 	return true;
 }
@@ -1358,6 +1436,7 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 				} else if (buttonPress == 1) {
 					sysLog.sysLog <<
 						"[gameLoopPlay] Button press detected" << endl;
+						stats -> timesPressed++;
 
 					// Signify that the game has failed if the
 					// incorrect light is on
@@ -1370,17 +1449,20 @@ bool gameLoopPlay(Statistics* stats, GameData* game) {
 							TARGET_INDEX << endl;
 
 						passedLevel = false;
+						stats -> totalLivesLost++;
 					} else {
 						passedLevel = true;
 					}
 
 					levelEnded = true;
+
 				}
 
 				// Level has failed if time runs out
 				if (game->levelTimer->isFinished()) {
 					levelEnded = true;
 					passedLevel = false;
+					stats -> totalLivesLost++;
 				}
 			}
 
@@ -1515,7 +1597,7 @@ int main (const int argc, const char* const argv[]) {
 	playTime(stats);
 
 	// Write statistics to file
-
+	writeStats(outFile, stats);
 
 	// Exit game
 	deinitialize();
